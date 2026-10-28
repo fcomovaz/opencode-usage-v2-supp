@@ -790,9 +790,39 @@ def v2_db_path(tmp_path: Path) -> Path:
     yesterday_ms = int((now - timedelta(days=1)).timestamp() * 1000)
 
     rows = [
-        _make_v2_msg("v2_m1", "v2_s1", model_id="deepseek-v4", provider_id="opencode", input_tok=200, output_tok=50, cost=0.02, created_ms=today_ms),
-        _make_v2_msg("v2_m2", "v2_s1", model_id="deepseek-v4", provider_id="opencode", input_tok=100, output_tok=50, cost=0.01, created_ms=today_ms),
-        _make_v2_msg("v2_m3", "v2_s2", model_id="gpt-4o", provider_id="openai", input_tok=500, output_tok=100, cost=0.05, created_ms=yesterday_ms),
+        _make_v2_msg(
+            "v2_m1",
+            "v2_s1",
+            agent="build",
+            model_id="deepseek-v4",
+            provider_id="opencode",
+            input_tok=200,
+            output_tok=50,
+            cost=0.02,
+            created_ms=today_ms,
+        ),
+        _make_v2_msg(
+            "v2_m2",
+            "v2_s1",
+            agent="explore",
+            model_id="deepseek-v4",
+            provider_id="opencode",
+            input_tok=100,
+            output_tok=50,
+            cost=0.01,
+            created_ms=today_ms,
+        ),
+        _make_v2_msg(
+            "v2_m3",
+            "v2_s2",
+            agent="build",
+            model_id="gpt-4o",
+            provider_id="openai",
+            input_tok=500,
+            output_tok=100,
+            cost=0.05,
+            created_ms=yesterday_ms,
+        ),
         # 0 tokens call (aborted) -> should not count as call
         _make_v2_msg("v2_m4", "v2_s2", model_id="gpt-4o", provider_id="openai", input_tok=0, output_tok=0, cost=0.0, created_ms=today_ms),
         # user message -> should be ignored
@@ -801,6 +831,84 @@ def v2_db_path(tmp_path: Path) -> Path:
     conn.executemany("INSERT INTO session_message (id, session_id, type, seq, time_created, data) VALUES (?, ?, ?, ?, ?, ?)", rows)
     conn.execute("INSERT INTO session_v2 (id, title, time_created) VALUES (?, ?, ?)", ("v2_s1", "V2 Debug", today_ms))
     conn.execute("INSERT INTO session_v2 (id, title, time_created) VALUES (?, ?, ?)", ("v2_s2", "V2 Feature", yesterday_ms))
+    conn.commit()
+    conn.close()
+    return path
+
+
+@pytest.fixture()
+def v2_seconds_db_path(tmp_path: Path) -> Path:
+    """Create a v2 test DB where time_created is stored in seconds rather than milliseconds."""
+    path = tmp_path / "opencode_v2_sec.db"
+    conn = sqlite3.connect(str(path))
+    conn.execute(
+        "CREATE TABLE session_v2 (id TEXT PRIMARY KEY, title TEXT, time_created INTEGER)"
+    )
+    conn.execute(
+        "CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER, time_created INTEGER, data TEXT)"
+    )
+    now = datetime.now(tz=timezone.utc)
+    today_sec = int(now.timestamp())
+    msg = _make_v2_msg(
+        "v2_sec_m1",
+        "v2_s1",
+        model_id="deepseek-v4",
+        provider_id="opencode",
+        input_tok=200,
+        output_tok=50,
+        cost=0.02,
+        created_ms=today_sec,
+    )
+    conn.execute(
+        "INSERT INTO session_message (id, session_id, type, seq, time_created, data) VALUES (?, ?, ?, ?, ?, ?)",
+        ("v2_sec_m1", "v2_s1", "assistant", 1, today_sec, msg[5]),
+    )
+    conn.execute(
+        "INSERT INTO session_v2 (id, title, time_created) VALUES (?, ?, ?)",
+        ("v2_s1", "V2 Sec Session", today_sec),
+    )
+    conn.commit()
+    conn.close()
+    return path
+
+
+@pytest.fixture()
+def mixed_disjoint_db_path(tmp_path: Path) -> Path:
+    """Create a populated mixed DB where v1 and v2 have completely disjoint sessions and messages."""
+    path = tmp_path / "opencode_mixed_disjoint.db"
+    conn = sqlite3.connect(str(path))
+    conn.execute("CREATE TABLE session (id TEXT PRIMARY KEY, title TEXT)")
+    conn.execute("CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT)")
+    conn.execute("CREATE TABLE session_v2 (id TEXT PRIMARY KEY, title TEXT, time_created INTEGER)")
+    conn.execute(
+        "CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER, time_created INTEGER, data TEXT)"
+    )
+
+    now = datetime.now(tz=timezone.utc)
+    today_ms = int(now.timestamp() * 1000)
+    old_ms = int((now - timedelta(days=10)).timestamp() * 1000)
+
+    # v1 message: session s_v1, model deepseek-r1
+    v1_msg = _make_msg("v1_m1", "s_v1", model="deepseek-r1", total_tok=500, cost=0.02, created_ms=old_ms)
+    conn.execute("INSERT INTO message VALUES (?, ?, ?)", v1_msg)
+    conn.execute("INSERT INTO session VALUES (?, ?)", ("s_v1", "V1 Disjoint Session"))
+
+    # v2 message: session s_v2, model deepseek-v4
+    v2_msg = _make_v2_msg(
+        "v2_m1",
+        "s_v2",
+        model_id="deepseek-v4",
+        input_tok=300,
+        output_tok=100,
+        cost=0.03,
+        created_ms=today_ms,
+    )
+    conn.execute(
+        "INSERT INTO session_message (id, session_id, type, seq, time_created, data) VALUES (?, ?, ?, ?, ?, ?)",
+        v2_msg,
+    )
+    conn.execute("INSERT INTO session_v2 VALUES (?, ?, ?)", ("s_v2", "V2 Disjoint Session", today_ms))
+
     conn.commit()
     conn.close()
     return path
@@ -874,6 +982,82 @@ class TestV2SchemaSupport:
         assert "V2 Debug" in labels
         assert "V2 Feature" in labels
 
+    def test_v2_daily(self, v2_db_path: Path) -> None:
+        """v2 database aggregates daily usage with date labels."""
+        db = OpenCodeDB(db_path=v2_db_path)
+        rows = db.daily()
+        assert len(rows) == 2
+        for r in rows:
+            assert "-" in r.label
+        today_str = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+        today_row = next(r for r in rows if r.label == today_str)
+        assert today_row.calls == 2
+        assert today_row.tokens.total == 400
+
+    def test_v2_by_agent(self, v2_db_path: Path) -> None:
+        """v2 database groups by agent and model correctly."""
+        db = OpenCodeDB(db_path=v2_db_path)
+        rows = db.by_agent()
+        agent_models = {(r.label, r.detail): r for r in rows}
+        assert ("build", "deepseek-v4") in agent_models
+        assert ("explore", "deepseek-v4") in agent_models
+        assert ("build", "gpt-4o") in agent_models
+        assert agent_models[("build", "deepseek-v4")].calls == 1
+        assert agent_models[("explore", "deepseek-v4")].calls == 1
+        assert agent_models[("build", "gpt-4o")].calls == 1
+
+    def test_v2_by_provider(self, v2_db_path: Path) -> None:
+        """v2 database groups by provider correctly."""
+        db = OpenCodeDB(db_path=v2_db_path)
+        rows = db.by_provider()
+        providers = {r.label: r for r in rows}
+        assert "opencode" in providers
+        assert "openai" in providers
+        assert providers["opencode"].calls == 2
+        assert providers["openai"].calls == 1
+
+    def test_v2_since_filter(self, v2_db_path: Path) -> None:
+        """v2 database correctly filters rows with since parameter."""
+        db = OpenCodeDB(db_path=v2_db_path)
+        since = datetime.now(tz=timezone.utc) - timedelta(hours=12)
+        rows = db.daily(since=since)
+        assert len(rows) == 1
+        assert rows[0].calls == 2
+        assert rows[0].tokens.total == 400
+
+    def test_v2_until_filter(self, v2_db_path: Path) -> None:
+        """v2 database correctly filters rows with until parameter."""
+        db = OpenCodeDB(db_path=v2_db_path)
+        until = datetime.now(tz=timezone.utc) - timedelta(hours=12)
+        rows = db.daily(until=until)
+        assert len(rows) == 1
+        assert rows[0].calls == 1
+        assert rows[0].tokens.total == 600
+
+    def test_v2_seconds_timestamps(self, v2_seconds_db_path: Path) -> None:
+        """v2 database handles time_created stored in seconds (< 10^12) correctly."""
+        db = OpenCodeDB(db_path=v2_seconds_db_path)
+        totals = db.totals()
+        assert totals.calls == 1
+        assert totals.tokens.total == 250
+        assert pytest.approx(totals.cost, abs=0.001) == 0.02
+        daily = db.daily()
+        assert len(daily) == 1
+        assert "-" in daily[0].label
+
+    def test_v2_to_dicts(self, v2_db_path: Path) -> None:
+        """v2 database produces expected dict structure for --json output."""
+        db = OpenCodeDB(db_path=v2_db_path)
+        rows = db.by_model()
+        dicts = db.to_dicts(rows)
+        assert len(dicts) == 2
+        for d in dicts:
+            assert "label" in d
+            assert "calls" in d
+            assert "tokens" in d
+            assert "cost" in d
+            assert isinstance(d["tokens"]["total"], int)
+
 
 class TestMixedSchemaSupport:
     def test_mixed_deduplication(self, mixed_db_path: Path) -> None:
@@ -887,4 +1071,18 @@ class TestMixedSchemaSupport:
         # shared_v2: input=300, output=100, cache_r=10, cache_w=5 -> total=400
         # v2_only: input=500, output=200, cache_r=10, cache_w=5 -> total=700
         assert totals.tokens.total == 1400
+
+    def test_mixed_disjoint(self, mixed_disjoint_db_path: Path) -> None:
+        """Mixed database seamlessly merges disjoint v1 and v2 records."""
+        db = OpenCodeDB(db_path=mixed_disjoint_db_path)
+        totals = db.totals()
+        assert totals.calls == 2
+        assert totals.tokens.total == 900
+        assert pytest.approx(totals.cost, abs=0.001) == 0.05
+
+        models = {r.label for r in db.by_model()}
+        assert models == {"deepseek-r1", "deepseek-v4"}
+
+        sessions = {r.label for r in db.by_session()}
+        assert sessions == {"V1 Disjoint Session", "V2 Disjoint Session"}
 
