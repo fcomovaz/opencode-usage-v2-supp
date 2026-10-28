@@ -31,9 +31,10 @@ Because `opencode-usage` queried only the legacy `message` and `session` tables,
 ## Evidence & Verification
 
 - **Tests added**:
-  - `TestV2SchemaSupport`: tests `totals()`, `by_model()`, and `by_session()` against a synthetic v2-only database fixture.
-  - `TestMixedSchemaSupport`: tests deduplication and token sums against a synthetic mixed database with overlapping message IDs.
-- **Test suite**: All existing and new tests in `test_db.py`, `test_cli.py`, `test_render.py`, `test_models.py`, `test_auth.py`, `test_llm.py` pass cleanly (187 passing tests).
+  - `TestV2SchemaSupport`: tests `totals()`, `by_model()`, `by_session()`, `daily()`, `by_agent()`, `by_provider()`, time filters (`since`/`until`), timestamps in seconds vs ms, and JSON serialization against synthetic v2 databases.
+  - `TestMixedSchemaSupport`: tests deduplication with overlapping message IDs as well as disjoint v1 and v2 records.
+  - `TestFetchRows`: verifies CLI row fetching across all grouping modes (`day`, `model`, `agent`, `provider`, `session`) on v2 databases.
+- **Test suite**: All existing and new tests pass cleanly (196 passing tests).
 - **Tested on real OpenCode v2 database**:
   - `opencode-usage run --since 3d` correctly reports recent v2 assistant calls (e.g. 97 calls with model breakdown `beam-free`, `deepseek-v4.1-flash-free`).
   - `opencode-usage run --since 14d` displays both historical v1 calls and modern v2 calls without duplication.
