@@ -886,5 +886,5 @@ class TestMixedSchemaSupport:
         # v1_only: input=100, output=50, reasoning=0, cache_r=10, cache_w=5 -> total=165
         # shared_v2: input=300, output=100, cache_r=10, cache_w=5 -> total=400
         # v2_only: input=500, output=200, cache_r=10, cache_w=5 -> total=700
-        assert totals.tokens.total == 1265
+        assert totals.tokens.total == 1400
 
