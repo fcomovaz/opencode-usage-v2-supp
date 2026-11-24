@@ -46,13 +46,13 @@ class FacetCache:
             return None
 
     def put(self, session_id: str, facet: SessionFacet) -> None:
-        """Atomically write facet to cache using .tmp then os.rename()."""
+        """Atomically write facet to cache using .tmp then os.replace()."""
         data = asdict(facet)
         tmp_path = self.cache_dir / f"{session_id}.json.tmp"
         json_path = self.cache_dir / f"{session_id}.json"
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        os.rename(tmp_path, json_path)
+        os.replace(tmp_path, json_path)
 
     def clear(self) -> None:
         """Remove all cached *.json files."""

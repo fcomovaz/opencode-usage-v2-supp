@@ -15,24 +15,43 @@ CLI tool to track and display [OpenCode](https://github.com/opencodeco/opencode)
 
 ## Installation
 
-```bash
-# From PyPI
-pip install opencode-usage
+### Local setup with Python & pip (Recommended)
 
-# Or with uv
-uv tool install opencode-usage
+To run or develop locally with standard Python tools (without needing `uv`):
+
+```bash
+# Clone repository
+git clone https://github.com/fcomovaz/opencode-usage-v2-supp.git
+cd opencode-usage-v2-supp
+
+# Create virtual environment
+python -m venv .venv
+
+# Activate virtual environment
+# On macOS / Linux:
+source .venv/bin/activate
+# On Windows (PowerShell):
+.venv\Scripts\Activate.ps1
+# On Windows (Command Prompt):
+.venv\Scripts\activate.bat
+
+# Install in editable mode
+pip install -e .
+
+# Run the CLI
+opencode-usage run --since 1d
 ```
 
-### From source
+### Alternative: With uv
 
 ```bash
-git clone https://github.com/rchardx/opencode-usage.git
-cd opencode-usage
+git clone https://github.com/fcomovaz/opencode-usage-v2-supp.git
+cd opencode-usage-v2-supp
 uv sync
 uv tool install -e .
 ```
 
-After installation, `opencode-usage` is available globally.
+After installation, `opencode-usage` is available globally or within your activated virtual environment.
 
 ## Usage
 
@@ -134,8 +153,8 @@ Default database locations:
 ## Development
 
 ```bash
-git clone https://github.com/rchardx/opencode-usage.git
-cd opencode-usage
+git clone https://github.com/fcomovaz/opencode-usage-v2-supp.git
+cd opencode-usage-v2-supp
 uv sync
 
 # Lint & format
