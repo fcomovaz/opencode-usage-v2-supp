@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.2.5](https://github.com/fcomovaz/opencode-usage-v2-supp/compare/v0.2.4...v0.2.5) (2026-11-24)
+
+
+### Features
+
+* prepare opencode-usage-v2 packaging and PyPI trusted publishing ([14391d1](https://github.com/fcomovaz/opencode-usage-v2-supp/commit/14391d124e462137406edbc338b69448979149c4))
+* support OpenCode v2 and mixed schemas in db queries ([6f276b1](https://github.com/fcomovaz/opencode-usage-v2-supp/commit/6f276b1d12d07c2b1345c1a03ff213b5686c1b70))
+
+
+### Bug Fixes
+
+* **db,llm:** improve code quality and safety ([b42fffa](https://github.com/fcomovaz/opencode-usage-v2-supp/commit/b42fffa799be585ee13744bd67f2cb39ba920a09))
+
+
+### Documentation
+
+* add OpenCode v2 schema support documentation and PR details ([dfa5dd9](https://github.com/fcomovaz/opencode-usage-v2-supp/commit/dfa5dd91a247097fe0108b575a12cbc4eb3144b9))
+* add standard pip and venv local install instructions; fix windows cache replace ([eb33d3c](https://github.com/fcomovaz/opencode-usage-v2-supp/commit/eb33d3c17e2beb3d9689a39e2b1e76b7cf83a11c))
+* update PR description with extended test coverage details ([06b0201](https://github.com/fcomovaz/opencode-usage-v2-supp/commit/06b0201d70117d8cf43b4552fd335b2ee4785da1))
+
 ## [0.2.4](https://github.com/rchardx/opencode-usage/compare/v0.2.3...v0.2.4) (2026-03-05)
 
 
