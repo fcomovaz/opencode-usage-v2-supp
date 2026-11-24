@@ -32,6 +32,8 @@ def _run_db_path() -> str | None:
             [binary, "db", "path"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
         )
         if result.returncode == 0 and result.stdout.strip():
@@ -62,6 +64,8 @@ def _run_debug_paths() -> dict[str, str]:
             [binary, "debug", "paths"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
         )
         if result.returncode != 0:
@@ -143,6 +147,8 @@ def run_models() -> list[str]:
             [binary, "models"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=15,
         )
         if result.returncode == 0:

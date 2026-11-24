@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Any
 
 from opencode_usage.insights.types import AggregatedStats
 
@@ -361,7 +362,7 @@ def _fmt_date_range(date_range: tuple[int, int]) -> str:
         return "\u2014"
 
 
-def generate_report(insights_data: dict) -> str:
+def generate_report(insights_data: dict[str, Any]) -> str:
     """Assemble the full 9-section terminal-style HTML report."""
     stats: AggregatedStats = insights_data.get("aggregated_stats") or AggregatedStats(
         total_sessions=0,

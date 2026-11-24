@@ -6,7 +6,7 @@ import sys
 import warnings
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -20,6 +20,8 @@ from .types import InsightsConfig
 
 if TYPE_CHECKING:
     import argparse
+
+    from .types import SessionFacet
 
 console = Console()
 
@@ -68,9 +70,9 @@ def run_insights(args: argparse.Namespace) -> None:
     if config.force:
         cache.clear()
 
-    facets: dict[str, object] = {}
-    aggregate_results: dict[str, object] = {}
-    at_a_glance: dict[str, object] = {}
+    facets: dict[str, SessionFacet] = {}
+    aggregate_results: dict[str, dict[str, Any]] = {}
+    at_a_glance: dict[str, Any] = {}
     llm_available = True
 
     try:

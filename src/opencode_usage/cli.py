@@ -7,6 +7,7 @@ import json
 import re
 import sys
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from . import __version__, render
@@ -58,9 +59,17 @@ def _add_time_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _detect_prog() -> str:
+    """Return the invoked CLI name when run via a known entry point."""
+    name = Path(sys.argv[0]).stem if sys.argv and sys.argv[0] else ""
+    if name in {"opencode-usage", "opencode-usage-v2"}:
+        return name
+    return "opencode-usage"
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="opencode-usage",
+        prog=_detect_prog(),
         description="Track and display OpenCode token usage statistics.",
     )
     p.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}")

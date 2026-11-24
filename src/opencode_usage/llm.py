@@ -4,6 +4,7 @@ import json
 import ssl
 import urllib.error
 import urllib.request
+from typing import Any
 
 from .auth import Credentials
 
@@ -70,8 +71,8 @@ def chat_complete(
 def chat_complete_json(
     credentials: Credentials,
     messages: list[dict[str, str]],
-    **kwargs: object,
-) -> dict[str, object]:
+    **kwargs: Any,
+) -> dict[str, Any]:
     """Call OpenAI-compatible API and return parsed JSON response."""
     raw = chat_complete(credentials, messages, **kwargs)
 

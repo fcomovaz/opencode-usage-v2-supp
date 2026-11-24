@@ -778,11 +778,11 @@ def v2_db_path(tmp_path: Path) -> Path:
     """Create a populated v2-only test DB and return its path."""
     path = tmp_path / "opencode_v2.db"
     conn = sqlite3.connect(str(path))
+    conn.execute("CREATE TABLE session_v2 (id TEXT PRIMARY KEY, title TEXT, time_created INTEGER)")
     conn.execute(
-        "CREATE TABLE session_v2 (id TEXT PRIMARY KEY, title TEXT, time_created INTEGER)"
-    )
-    conn.execute(
-        "CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER, time_created INTEGER, data TEXT)"
+        "CREATE TABLE session_message ("
+        "id TEXT PRIMARY KEY, session_id TEXT, type TEXT, "
+        "seq INTEGER, time_created INTEGER, data TEXT)"
     )
 
     now = datetime.now(tz=timezone.utc)
@@ -824,13 +824,42 @@ def v2_db_path(tmp_path: Path) -> Path:
             created_ms=yesterday_ms,
         ),
         # 0 tokens call (aborted) -> should not count as call
-        _make_v2_msg("v2_m4", "v2_s2", model_id="gpt-4o", provider_id="openai", input_tok=0, output_tok=0, cost=0.0, created_ms=today_ms),
+        _make_v2_msg(
+            "v2_m4",
+            "v2_s2",
+            model_id="gpt-4o",
+            provider_id="openai",
+            input_tok=0,
+            output_tok=0,
+            cost=0.0,
+            created_ms=today_ms,
+        ),
         # user message -> should be ignored
-        _make_v2_msg("v2_m5", "v2_s1", model_id="deepseek-v4", provider_id="opencode", input_tok=50, output_tok=0, cost=0.0, created_ms=today_ms, msg_type="user"),
+        _make_v2_msg(
+            "v2_m5",
+            "v2_s1",
+            model_id="deepseek-v4",
+            provider_id="opencode",
+            input_tok=50,
+            output_tok=0,
+            cost=0.0,
+            created_ms=today_ms,
+            msg_type="user",
+        ),
     ]
-    conn.executemany("INSERT INTO session_message (id, session_id, type, seq, time_created, data) VALUES (?, ?, ?, ?, ?, ?)", rows)
-    conn.execute("INSERT INTO session_v2 (id, title, time_created) VALUES (?, ?, ?)", ("v2_s1", "V2 Debug", today_ms))
-    conn.execute("INSERT INTO session_v2 (id, title, time_created) VALUES (?, ?, ?)", ("v2_s2", "V2 Feature", yesterday_ms))
+    conn.executemany(
+        "INSERT INTO session_message (id, session_id, type, seq, time_created, data) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        rows,
+    )
+    conn.execute(
+        "INSERT INTO session_v2 (id, title, time_created) VALUES (?, ?, ?)",
+        ("v2_s1", "V2 Debug", today_ms),
+    )
+    conn.execute(
+        "INSERT INTO session_v2 (id, title, time_created) VALUES (?, ?, ?)",
+        ("v2_s2", "V2 Feature", yesterday_ms),
+    )
     conn.commit()
     conn.close()
     return path
@@ -841,11 +870,11 @@ def v2_seconds_db_path(tmp_path: Path) -> Path:
     """Create a v2 test DB where time_created is stored in seconds rather than milliseconds."""
     path = tmp_path / "opencode_v2_sec.db"
     conn = sqlite3.connect(str(path))
+    conn.execute("CREATE TABLE session_v2 (id TEXT PRIMARY KEY, title TEXT, time_created INTEGER)")
     conn.execute(
-        "CREATE TABLE session_v2 (id TEXT PRIMARY KEY, title TEXT, time_created INTEGER)"
-    )
-    conn.execute(
-        "CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER, time_created INTEGER, data TEXT)"
+        "CREATE TABLE session_message ("
+        "id TEXT PRIMARY KEY, session_id TEXT, type TEXT, "
+        "seq INTEGER, time_created INTEGER, data TEXT)"
     )
     now = datetime.now(tz=timezone.utc)
     today_sec = int(now.timestamp())
@@ -860,7 +889,8 @@ def v2_seconds_db_path(tmp_path: Path) -> Path:
         created_ms=today_sec,
     )
     conn.execute(
-        "INSERT INTO session_message (id, session_id, type, seq, time_created, data) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO session_message (id, session_id, type, seq, time_created, data) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
         ("v2_sec_m1", "v2_s1", "assistant", 1, today_sec, msg[5]),
     )
     conn.execute(
@@ -874,14 +904,16 @@ def v2_seconds_db_path(tmp_path: Path) -> Path:
 
 @pytest.fixture()
 def mixed_disjoint_db_path(tmp_path: Path) -> Path:
-    """Create a populated mixed DB where v1 and v2 have completely disjoint sessions and messages."""
+    """Create a mixed DB where v1 and v2 have completely disjoint sessions and messages."""
     path = tmp_path / "opencode_mixed_disjoint.db"
     conn = sqlite3.connect(str(path))
     conn.execute("CREATE TABLE session (id TEXT PRIMARY KEY, title TEXT)")
     conn.execute("CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT)")
     conn.execute("CREATE TABLE session_v2 (id TEXT PRIMARY KEY, title TEXT, time_created INTEGER)")
     conn.execute(
-        "CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER, time_created INTEGER, data TEXT)"
+        "CREATE TABLE session_message ("
+        "id TEXT PRIMARY KEY, session_id TEXT, type TEXT, "
+        "seq INTEGER, time_created INTEGER, data TEXT)"
     )
 
     now = datetime.now(tz=timezone.utc)
@@ -889,7 +921,9 @@ def mixed_disjoint_db_path(tmp_path: Path) -> Path:
     old_ms = int((now - timedelta(days=10)).timestamp() * 1000)
 
     # v1 message: session s_v1, model deepseek-r1
-    v1_msg = _make_msg("v1_m1", "s_v1", model="deepseek-r1", total_tok=500, cost=0.02, created_ms=old_ms)
+    v1_msg = _make_msg(
+        "v1_m1", "s_v1", model="deepseek-r1", total_tok=500, cost=0.02, created_ms=old_ms
+    )
     conn.execute("INSERT INTO message VALUES (?, ?, ?)", v1_msg)
     conn.execute("INSERT INTO session VALUES (?, ?)", ("s_v1", "V1 Disjoint Session"))
 
@@ -904,10 +938,13 @@ def mixed_disjoint_db_path(tmp_path: Path) -> Path:
         created_ms=today_ms,
     )
     conn.execute(
-        "INSERT INTO session_message (id, session_id, type, seq, time_created, data) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO session_message (id, session_id, type, seq, time_created, data) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
         v2_msg,
     )
-    conn.execute("INSERT INTO session_v2 VALUES (?, ?, ?)", ("s_v2", "V2 Disjoint Session", today_ms))
+    conn.execute(
+        "INSERT INTO session_v2 VALUES (?, ?, ?)", ("s_v2", "V2 Disjoint Session", today_ms)
+    )
 
     conn.commit()
     conn.close()
@@ -924,7 +961,11 @@ def mixed_db_path(tmp_path: Path) -> Path:
     conn.execute("CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT)")
     # v2 tables
     conn.execute("CREATE TABLE session_v2 (id TEXT PRIMARY KEY, title TEXT, time_created INTEGER)")
-    conn.execute("CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER, time_created INTEGER, data TEXT)")
+    conn.execute(
+        "CREATE TABLE session_message ("
+        "id TEXT PRIMARY KEY, session_id TEXT, type TEXT, "
+        "seq INTEGER, time_created INTEGER, data TEXT)"
+    )
 
     now = datetime.now(tz=timezone.utc)
     today_ms = int(now.timestamp() * 1000)
@@ -938,15 +979,47 @@ def mixed_db_path(tmp_path: Path) -> Path:
     # Migrated message present in BOTH v1 and v2 with SAME ID
     shared_v1 = _make_msg("shared_msg", "s_shared", total_tok=400, cost=0.02, created_ms=today_ms)
     conn.execute("INSERT INTO message VALUES (?, ?, ?)", shared_v1)
-    shared_v2 = _make_v2_msg("shared_msg", "s_shared", model_id="test-model", provider_id="openrouter", input_tok=300, output_tok=100, cost=0.02, created_ms=today_ms)
-    conn.execute("INSERT INTO session_message (id, session_id, type, seq, time_created, data) VALUES (?, ?, ?, ?, ?, ?)", shared_v2)
+    shared_v2 = _make_v2_msg(
+        "shared_msg",
+        "s_shared",
+        model_id="test-model",
+        provider_id="openrouter",
+        input_tok=300,
+        output_tok=100,
+        cost=0.02,
+        created_ms=today_ms,
+    )
+    conn.execute(
+        "INSERT INTO session_message (id, session_id, type, seq, time_created, data) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        shared_v2,
+    )
     conn.execute("INSERT INTO session VALUES (?, ?)", ("s_shared", "Shared Session V1"))
-    conn.execute("INSERT INTO session_v2 (id, title, time_created) VALUES (?, ?, ?)", ("s_shared", "Shared Session V2", today_ms))
+    conn.execute(
+        "INSERT INTO session_v2 (id, title, time_created) VALUES (?, ?, ?)",
+        ("s_shared", "Shared Session V2", today_ms),
+    )
 
     # New message only in v2
-    v2_only = _make_v2_msg("v2_only_msg", "s_new", model_id="v2-model", provider_id="opencode", input_tok=500, output_tok=200, cost=0.04, created_ms=today_ms)
-    conn.execute("INSERT INTO session_message (id, session_id, type, seq, time_created, data) VALUES (?, ?, ?, ?, ?, ?)", v2_only)
-    conn.execute("INSERT INTO session_v2 (id, title, time_created) VALUES (?, ?, ?)", ("s_new", "New V2 Session", today_ms))
+    v2_only = _make_v2_msg(
+        "v2_only_msg",
+        "s_new",
+        model_id="v2-model",
+        provider_id="opencode",
+        input_tok=500,
+        output_tok=200,
+        cost=0.04,
+        created_ms=today_ms,
+    )
+    conn.execute(
+        "INSERT INTO session_message (id, session_id, type, seq, time_created, data) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        v2_only,
+    )
+    conn.execute(
+        "INSERT INTO session_v2 (id, title, time_created) VALUES (?, ?, ?)",
+        ("s_new", "New V2 Session", today_ms),
+    )
 
     conn.commit()
     conn.close()
@@ -1061,7 +1134,7 @@ class TestV2SchemaSupport:
 
 class TestMixedSchemaSupport:
     def test_mixed_deduplication(self, mixed_db_path: Path) -> None:
-        """Mixed database must deduplicate shared IDs and include both v1-only and v2-only messages."""
+        """Mixed DB deduplicates shared IDs and includes v1-only and v2-only messages."""
         db = OpenCodeDB(db_path=mixed_db_path)
         totals = db.totals()
         # 1 v1_only + 1 shared (not double counted!) + 1 v2_only = 3 calls
@@ -1085,4 +1158,3 @@ class TestMixedSchemaSupport:
 
         sessions = {r.label for r in db.by_session()}
         assert sessions == {"V1 Disjoint Session", "V2 Disjoint Session"}
-

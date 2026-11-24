@@ -1,23 +1,54 @@
 [build-system]
 build-backend = "hatchling.build"
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 
 [dependency-groups]
 dev = ["pytest>=7.0"]
 
 [project]
-dependencies = [
-  "rich>=13.0"
+authors = [
+  { name = "rchardx" },
 ]
-description = "CLI tool to track and display OpenCode token usage statistics"
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Utilities",
+]
+dependencies = [
+  "rich>=13.0",
+]
+description = "CLI tool to track and display OpenCode token usage statistics (v1 and v2)"
+keywords = ["opencode", "cli", "tokens", "usage", "analytics", "sqlite"]
 license = "MIT"
-name = "opencode-usage"
+license-files = ["LICENSE"]
+maintainers = [
+  { name = "fcomovaz" },
+]
+name = "opencode-usage-v2"
 readme = "README.md"
 requires-python = ">=3.10"
 version = "0.2.4"
 
 [project.scripts]
 opencode-usage = "opencode_usage.cli:main"
+opencode-usage-v2 = "opencode_usage.cli:main"
+
+[project.urls]
+Changelog = "https://github.com/fcomovaz/opencode-usage-v2-supp/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/fcomovaz/opencode-usage-v2-supp"
+Issues = "https://github.com/fcomovaz/opencode-usage-v2-supp/issues"
+Repository = "https://github.com/fcomovaz/opencode-usage-v2-supp"
+
+[tool.bandit]
+exclude_dirs = ["tests"]
+skips = ["B310", "B404", "B603", "B607", "B608"]
 
 [tool.commitizen]
 major_version_zero = true
@@ -28,7 +59,20 @@ version_provider = "pep621"
 version_scheme = "pep440"
 
 [tool.hatch.build.targets.sdist]
-include = ["src/opencode_usage"]
+exclude = [
+  ".github/**",
+  "AGENTS.md",
+  "CHANGELOG.md",
+  "PR_DESCRIPTION.md",
+  "opencode-insights.html",
+  "tests/**",
+]
+include = [
+  "src/opencode_usage/**",
+  "pyproject.toml",
+  "README.md",
+  "LICENSE",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/opencode_usage"]
@@ -49,7 +93,7 @@ select = [
   "UP",  # pyupgrade
   "B",  # flake8-bugbear
   "SIM",  # flake8-simplify
-  "RUF"  # ruff-specific
+  "RUF",  # ruff-specific
 ]
 
 [tool.ruff.lint.isort]

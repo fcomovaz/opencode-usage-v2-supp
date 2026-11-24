@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import tempfile
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -149,6 +150,7 @@ class TestRunLlm:
             assert "--model" in args
             assert "opencode/test-model" in args
             assert "--dir" in args
+            assert args[args.index("--dir") + 1] == tempfile.gettempdir()
 
     def test_raises_file_not_found_on_127(self):
         with (

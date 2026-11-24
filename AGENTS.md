@@ -1,6 +1,6 @@
-# AGENTS.md — opencode-usage
+# AGENTS.md — opencode-usage-v2
 
-Guidelines for AI agents working in this repository.
+Guidelines for AI agents working in this repository (`fcomovaz/opencode-usage-v2-supp`, PyPI distribution `opencode-usage-v2`, Python import package `opencode_usage`).
 
 ## Project Overview
 
@@ -146,7 +146,7 @@ uvx ruff format .
 ## CI Pipelines
 
 - **CI** (`.github/workflows/ci.yml`): Runs on push/PR to main. Lint with ruff, test on Python 3.10/3.12/3.13.
-- **Release** (`.github/workflows/release.yml`): Runs on push to main. Release-please manages version PRs and auto-syncs `uv.lock`; on merge, publishes to PyPI and creates GitHub Release.
+- **Release** (`.github/workflows/release.yml`): Runs on push to main (and `workflow_dispatch`). Release-please manages version PRs and auto-syncs `uv.lock`; on merge, runs `uv build`, `twine check`, publishes `opencode-usage-v2` to PyPI via OIDC Trusted Publishing, and creates GitHub Release.
 
 ## Code Style
 
@@ -162,18 +162,18 @@ Defined in `pyproject.toml`:
 Every module starts with `from __future__ import annotations`. Group order:
 
 ```python
-from __future__ import annotations          # 1. Always first
+from __future__ import annotations  # 1. Always first
 
-import os                                    # 2. Standard library (alphabetized)
+import os  # 2. Standard library (alphabetized)
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from rich.console import Console             # 3. Third-party
+from rich.console import Console  # 3. Third-party
 
-from .db import OpenCodeDB, UsageRow         # 4. Local (relative imports)
+from .db import OpenCodeDB, UsageRow  # 4. Local (relative imports)
 ```
 
 Use `TYPE_CHECKING` for imports only needed by type checkers:
@@ -213,9 +213,10 @@ d: dict[str, Any] = { ... }
 One-line triple-quoted summaries. No parameter/return docs:
 
 ```python
-"""SQLite query layer for OpenCode's database."""       # module
+"""SQLite query layer for OpenCode's database."""  # module
+
 """Read-only access to the OpenCode SQLite database."""  # class
-"""Human-readable token count."""                        # function
+"""Human-readable token count."""  # function
 ```
 
 ### Error Handling
@@ -259,6 +260,7 @@ class UsageRow:
     cost: float = 0.0
     detail: str | None = None
 
+
 @dataclass
 class SessionFacet:
     session_id: str
@@ -266,6 +268,7 @@ class SessionFacet:
     goal_categories: dict[str, int] = field(default_factory=dict)
     outcome: str = ""
     # ... (structured LLM extraction result per session)
+
 
 @dataclass
 class InsightsConfig:
@@ -331,7 +334,7 @@ docs: add PyPI installation instructions
 - **SQL**: Raw f-strings for dynamic GROUP BY/ORDER/WHERE, parameterized `?` for user values
 - **Datetime**: Always timezone-aware (`datetime.now().astimezone()`), stored as milliseconds in SQLite
 - **JSON output**: `round(cost, 4)`, `ensure_ascii=False`, `indent=2`
-- **Version**: `importlib.metadata.version("opencode-usage")` in `__init__.py`, canonical source is `pyproject.toml`
+- **Version**: `importlib.metadata.version("opencode-usage-v2")` (with fallback to `"opencode-usage"` and `"0.0.0+unknown"`) in `__init__.py`; canonical source is `pyproject.toml`. Console scripts: both `opencode-usage` and `opencode-usage-v2`.
 - **CLI wrapper** (`_opencode_cli.py`): `subprocess.run` to invoke `opencode` binary, results cached with `@lru_cache`, XDG-based fallback paths when binary unavailable
 - **Credential chain** (`auth.py`): Environment variable → `auth.json` → `opencode.json` for API key and base URL
 - **Concurrent LLM** (`analyze.py`): `ThreadPoolExecutor` with configurable worker count, `warnings.warn` on per-session failures, NDJSON stream parsing

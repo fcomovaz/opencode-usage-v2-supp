@@ -5,17 +5,23 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+import sys
 from datetime import datetime, timedelta
+from importlib.metadata import PackageNotFoundError
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
+from opencode_usage import _resolve_version
 from opencode_usage.cli import (
     _build_parser,
     _compute_deltas,
+    _detect_prog,
     _fetch_rows,
     _parse_since,
     _resolve_since,
+    main,
 )
 from opencode_usage.db import OpenCodeDB, TokenStats, UsageRow
 
@@ -295,11 +301,11 @@ def _make_cli_v2_db(tmp_path: Path) -> Path:
     """Create a minimal v2 database for CLI testing."""
     db_path = tmp_path / "opencode_v2_cli.db"
     conn = sqlite3.connect(str(db_path))
+    conn.execute("CREATE TABLE session_v2 (id TEXT PRIMARY KEY, title TEXT, time_created INTEGER)")
     conn.execute(
-        "CREATE TABLE session_v2 (id TEXT PRIMARY KEY, title TEXT, time_created INTEGER)"
-    )
-    conn.execute(
-        "CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER, time_created INTEGER, data TEXT)"
+        "CREATE TABLE session_message ("
+        "id TEXT PRIMARY KEY, session_id TEXT, type TEXT, "
+        "seq INTEGER, time_created INTEGER, data TEXT)"
     )
     now_ms = int(datetime.now().astimezone().timestamp() * 1000)
     data = json.dumps(
@@ -307,7 +313,12 @@ def _make_cli_v2_db(tmp_path: Path) -> Path:
             "agent": "build",
             "model": {"id": "v2-model", "providerID": "openrouter"},
             "cost": 0.01,
-            "tokens": {"input": 100, "output": 50, "reasoning": 0, "cache": {"read": 10, "write": 5}},
+            "tokens": {
+                "input": 100,
+                "output": 50,
+                "reasoning": 0,
+                "cache": {"read": 10, "write": 5},
+            },
             "time": {"created": now_ms},
         }
     )
@@ -379,3 +390,47 @@ class TestFetchRows:
         session_rows = _fetch_rows(db, "session")
         assert len(session_rows) == 1
         assert session_rows[0].label == "Test V2 Session"
+
+
+# ── version & prog detection ─────────────────────────────────
+
+
+class TestVersionAndProg:
+    def test_resolve_version_prefers_v2_dist(self):
+        def fake_version(name: str) -> str:
+            if name == "opencode-usage-v2":
+                return "0.3.0"
+            raise PackageNotFoundError(name)
+
+        with patch("opencode_usage.version", side_effect=fake_version):
+            assert _resolve_version() == "0.3.0"
+
+    def test_resolve_version_falls_back_to_legacy_and_unknown(self):
+        def legacy_only(name: str) -> str:
+            if name == "opencode-usage":
+                return "0.2.4"
+            raise PackageNotFoundError(name)
+
+        with patch("opencode_usage.version", side_effect=legacy_only):
+            assert _resolve_version() == "0.2.4"
+
+        with patch("opencode_usage.version", side_effect=PackageNotFoundError):
+            assert _resolve_version() == "0.0.0+unknown"
+
+    def test_detect_prog_matches_known_entrypoints(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["/usr/local/bin/opencode-usage-v2"])
+        assert _detect_prog() == "opencode-usage-v2"
+
+        monkeypatch.setattr(sys, "argv", [r"C:\venv\Scripts\opencode-usage.exe"])
+        assert _detect_prog() == "opencode-usage"
+
+        monkeypatch.setattr(sys, "argv", ["pytest"])
+        assert _detect_prog() == "opencode-usage"
+
+    def test_version_flag_outputs_prog_and_version(self, monkeypatch, capsys):
+        monkeypatch.setattr(sys, "argv", ["opencode-usage-v2"])
+        with pytest.raises(SystemExit) as exc:
+            main(["--version"])
+        assert exc.value.code == 0
+        captured = capsys.readouterr()
+        assert captured.out.startswith("opencode-usage-v2 ")

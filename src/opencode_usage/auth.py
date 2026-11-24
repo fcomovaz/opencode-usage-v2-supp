@@ -43,7 +43,7 @@ def resolve_credentials(provider: str = "openai", *, model: str | None = None) -
     auth_path = _default_auth_path()
     if not auth_path.exists():
         raise RuntimeError(f"Auth file not found at {auth_path}")
-    with open(auth_path) as f:
+    with open(auth_path, encoding="utf-8") as f:
         auth_data = json.load(f)
 
     if provider not in auth_data or auth_data[provider].get("type") != "api":
@@ -57,7 +57,7 @@ def resolve_credentials(provider: str = "openai", *, model: str | None = None) -
     base_url = ""
     config_path = _default_config_path()
     if config_path.exists():
-        with open(config_path) as f:
+        with open(config_path, encoding="utf-8") as f:
             config_data = json.load(f)
             base_url = (
                 config_data.get("provider", {})
@@ -73,7 +73,7 @@ def list_providers() -> list[str]:
     auth_path = _default_auth_path()
     if not auth_path.exists():
         return []
-    with open(auth_path) as f:
+    with open(auth_path, encoding="utf-8") as f:
         auth_data = json.load(f)
     return [
         name

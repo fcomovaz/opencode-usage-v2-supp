@@ -74,13 +74,11 @@ class OpenCodeDB:
 
     def _detect_tables(self, conn) -> set[str]:
         """Return the set of user table names in the database."""
-        rows = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()
+        rows = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         return {r["name"] for r in rows}
 
     def _source_query(self, conn) -> str:
-        """Return the SQL SELECT for normalized assistant messages across v1, v2, or mixed schemas."""
+        """Return normalized assistant SQL SELECT across v1, v2, or mixed schemas."""
         tables = self._detect_tables(conn)
         has_v1 = "message" in tables
         has_v2 = "session_message" in tables
@@ -92,7 +90,10 @@ class OpenCodeDB:
                 SELECT
                     id,
                     session_id,
-                    CASE WHEN time_created > 1000000000000 THEN time_created ELSE time_created * 1000 END AS time_created_ms,
+                    CASE
+                        WHEN time_created > 1000000000000 THEN time_created
+                        ELSE time_created * 1000
+                    END AS time_created_ms,
                     json_extract(data, '$.agent') AS agent,
                     json_extract(data, '$.model.id') AS model,
                     json_extract(data, '$.model.providerID') AS provider,
@@ -260,9 +261,7 @@ class OpenCodeDB:
         limit: int | None = None,
     ) -> list[UsageRow]:
         return self._base_query(
-            group_expr=(
-                "date(src.time_created_ms / 1000, 'unixepoch', 'localtime')"
-            ),
+            group_expr=("date(src.time_created_ms / 1000, 'unixepoch', 'localtime')"),
             since=since,
             until=until,
             order="label DESC",

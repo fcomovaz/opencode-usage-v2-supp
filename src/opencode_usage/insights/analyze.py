@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tempfile
 import threading
 import time
 import warnings
@@ -116,7 +117,17 @@ def run_llm(
     for attempt in range(max_retries):
         try:
             result = subprocess.run(
-                ["opencode", "run", prompt, "--format", "json", "--model", model, "--dir", "/tmp"],
+                [
+                    "opencode",
+                    "run",
+                    prompt,
+                    "--format",
+                    "json",
+                    "--model",
+                    model,
+                    "--dir",
+                    tempfile.gettempdir(),
+                ],
                 capture_output=True,
                 encoding="utf-8",
                 errors="replace",
