@@ -99,11 +99,14 @@ def get_db_path() -> Path:
 
     Resolution order:
     1. ``OPENCODE_DB`` environment variable (explicit override).
-    2. ``opencode db path`` CLI output.
-    3. Legacy XDG-based default.
+    2. ``db`` entry from ``opencode debug paths`` (OpenCode v2 CLI).
+    3. ``opencode db path`` CLI output (OpenCode v1 CLI fallback).
+    4. Legacy XDG-based default.
     """
     if custom := os.environ.get("OPENCODE_DB"):
         return Path(custom)
+    if debug_db := _run_debug_paths().get("db"):
+        return Path(debug_db)
     cli_path = _run_db_path()
     if cli_path:
         return Path(cli_path)

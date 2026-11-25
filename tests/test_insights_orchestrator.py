@@ -413,3 +413,40 @@ class TestRunInsights:
 
         assert output_path.exists()
         assert output_path.read_text() == "<html>custom</html>"
+
+    @patch("opencode_usage.insights.orchestrator.generate_report")
+    @patch("opencode_usage.insights.orchestrator.generate_at_a_glance")
+    @patch("opencode_usage.insights.orchestrator.run_aggregate_analysis")
+    @patch("opencode_usage.insights.orchestrator.extract_facets")
+    @patch("opencode_usage.insights.orchestrator.aggregate_all")
+    @patch("opencode_usage.insights.orchestrator.filter_sessions")
+    def test_updates_analyzed_sessions_and_warns_when_all_llm_calls_empty(
+        self,
+        mock_filter,
+        mock_aggregate,
+        mock_extract_facets,
+        mock_run_aggregate,
+        mock_at_a_glance,
+        mock_generate_report,
+        tmp_path,
+        capsys,
+    ):
+        output_path = tmp_path / "empty-llm.html"
+        mock_filter.return_value = ["s1", "s2"]
+        stats = _mock_stats()
+        stats.analyzed_sessions = 0
+        mock_aggregate.return_value = stats
+        mock_extract_facets.return_value = {}
+        mock_run_aggregate.return_value = {"project_areas": {}}
+        mock_at_a_glance.return_value = {}
+        mock_generate_report.return_value = "<html></html>"
+
+        run_insights(_make_args(output=str(output_path)))
+        assert stats.analyzed_sessions == 0
+        out = capsys.readouterr().out
+        assert "data-only mode" in out
+
+        # When facets succeed, stats.analyzed_sessions reflects analyzed count
+        mock_extract_facets.return_value = {"s1": MagicMock()}
+        run_insights(_make_args(output=str(output_path)))
+        assert stats.analyzed_sessions == 1

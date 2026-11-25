@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -11,6 +13,7 @@ import time
 import warnings
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -68,11 +71,28 @@ def parse_ndjson(output: str) -> tuple[str, float, dict[str, int]]:
     return "".join(text_parts), cost, tokens
 
 
-def extract_json_from_response(text: str) -> dict[str, Any]:
-    """Strip markdown code fences and parse JSON from LLM response text."""
-    stripped = text.strip()
+def _extract_ndjson_error(output: str) -> str:
+    """Return error message from NDJSON ``error`` events if present."""
+    for line in output.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("type") == "error":
+            err = event.get("error")
+            if isinstance(err, dict):
+                return str(err.get("message") or err.get("type") or err)
+            if err:
+                return str(err)
+    return ""
 
-    # Strip ```json ... ``` or ``` ... ```
+
+def _strip_code_fence(text: str) -> str:
+    """Strip outer markdown code fences if present."""
+    stripped = text.strip()
     if stripped.startswith("```json\n"):
         stripped = stripped[8:]
     elif stripped.startswith("```json"):
@@ -87,15 +107,62 @@ def extract_json_from_response(text: str) -> dict[str, Any]:
     elif stripped.endswith("```"):
         stripped = stripped[:-3]
 
-    stripped = stripped.strip()
+    return stripped.strip()
+
+
+def extract_json_from_response(text: str) -> dict[str, Any]:
+    """Strip markdown code fences and parse JSON from LLM response text."""
+    stripped = _strip_code_fence(text)
 
     try:
         result = json.loads(stripped)
-        if not isinstance(result, dict):
-            raise ValueError(f"Expected JSON object, got {type(result).__name__}")
-        return result
     except json.JSONDecodeError as e:
-        raise ValueError(f"LLM returned non-JSON: {text[:200]}") from e
+        # Try fenced code block embedded inside surrounding prose
+        m = re.search(r"```(?:json)?\s*\n?([\s\S]*?)```", text)
+        if m:
+            try:
+                result = json.loads(m.group(1).strip())
+            except json.JSONDecodeError:
+                result = None
+        else:
+            result = None
+
+        # Last resort: parse first JSON object starting at '{'
+        if result is None:
+            brace_idx = stripped.find("{")
+            if brace_idx != -1:
+                try:
+                    result, _ = json.JSONDecoder().raw_decode(stripped, brace_idx)
+                except json.JSONDecodeError:
+                    result = None
+
+        if result is None:
+            raise ValueError(f"LLM returned non-JSON: {text[:200]}") from e
+
+    if not isinstance(result, dict):
+        raise ValueError(f"Expected JSON object, got {type(result).__name__}")
+    return result
+
+
+@lru_cache(maxsize=1)
+def _supports_standalone() -> bool:
+    """Return True if the installed ``opencode run`` CLI supports ``--standalone``."""
+    binary = shutil.which("opencode")
+    if binary is None:
+        return False
+    try:
+        res = subprocess.run(
+            [binary, "run", "--help"],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+        )
+        return "--standalone" in (res.stdout or "")
+    except (OSError, subprocess.TimeoutExpired):
+        return False
 
 
 def run_llm(
@@ -113,21 +180,16 @@ def run_llm(
     """
     max_retries = 3
     last_exc: Exception | None = None
+    cmd = ["opencode", "run", prompt, "--format", "json", "--model", model]
+    if _supports_standalone():
+        cmd.append("--standalone")
 
     for attempt in range(max_retries):
         try:
             result = subprocess.run(
-                [
-                    "opencode",
-                    "run",
-                    prompt,
-                    "--format",
-                    "json",
-                    "--model",
-                    model,
-                    "--dir",
-                    tempfile.gettempdir(),
-                ],
+                cmd,
+                cwd=tempfile.gettempdir(),
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
                 encoding="utf-8",
                 errors="replace",
@@ -145,11 +207,20 @@ def run_llm(
         if result.returncode == 126:
             raise PermissionError("opencode binary not executable")
         if result.returncode != 0:
+            err_detail = (
+                result.stderr.strip()
+                or _extract_ndjson_error(result.stdout)
+                or result.stdout.strip()
+            )
             raise RuntimeError(
-                f"opencode run failed with code {result.returncode}: {result.stderr[:200]}"
+                f"opencode run failed with code {result.returncode}: {err_detail[:200]}"
             )
 
         text, _cost, _tokens = parse_ndjson(result.stdout)
+        if not text.strip():
+            err_detail = _extract_ndjson_error(result.stdout)
+            if err_detail:
+                raise RuntimeError(f"opencode error: {err_detail[:200]}")
         return extract_json_from_response(text)
 
     raise TimeoutError("opencode run timed out after 3 attempts") from last_exc
@@ -302,9 +373,9 @@ def extract_facets(
             try:
                 facet = future.result()
                 _on_done(sid, facet)
-            except Exception:
+            except Exception as exc:
                 warnings.warn(
-                    f"Failed to extract facets for session {sid}",
+                    f"Failed to extract facets for session {sid}: {exc}",
                     stacklevel=2,
                 )
                 _on_done(sid, None)

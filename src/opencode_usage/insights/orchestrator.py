@@ -95,10 +95,23 @@ def run_insights(args: argparse.Namespace) -> None:
             facets = extract_facets(
                 db_path, session_ids, config, cache=cache, on_progress=on_progress
             )
+            stats.analyzed_sessions = len(facets)
             progress.update(task, description="Running aggregate analysis...")
             aggregate_results = run_aggregate_analysis(facets, stats, config)
             progress.update(task, description="Generating summary...")
             at_a_glance = generate_at_a_glance(aggregate_results, stats, config)
+
+            if (
+                session_ids
+                and not facets
+                and not any(aggregate_results.values())
+                and not at_a_glance
+            ):
+                llm_available = False
+                console.print(
+                    "[yellow]Warning:[/yellow] LLM analysis produced no results — "
+                    "generating data-only report."
+                )
 
     except FileNotFoundError:
         llm_available = False

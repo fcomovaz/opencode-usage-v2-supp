@@ -41,6 +41,33 @@ class TestGetDbPath:
             result = get_db_path()
         assert result == Path("/cli/opencode.db")
 
+    def test_v2_debug_paths_used_when_db_path_removed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Uses ``db`` from ``opencode debug paths`` when ``opencode db path`` fails (v2 CLI)."""
+        monkeypatch.delenv("OPENCODE_DB", raising=False)
+        debug_output = (
+            "home       /home/user\n"
+            "data       /home/user/.local/share/opencode\n"
+            "db         /home/user/.local/share/opencode/opencode.db\n"
+        )
+
+        def fake_run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+            if cmd[1:] == ["debug", "paths"]:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0, stdout=debug_output, stderr=""
+                )
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=1, stdout="", stderr='Unexpected positional argument: "path"'
+            )
+
+        with (
+            patch("opencode_usage._opencode_cli.subprocess.run", side_effect=fake_run),
+            patch("opencode_usage._opencode_cli._find_opencode", return_value="/usr/bin/opencode"),
+        ):
+            result = get_db_path()
+        assert result == Path("/home/user/.local/share/opencode/opencode.db")
+
     def test_xdg_fallback_when_cli_unavailable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Falls back to XDG_DATA_HOME when opencode binary not found."""
         monkeypatch.delenv("OPENCODE_DB", raising=False)

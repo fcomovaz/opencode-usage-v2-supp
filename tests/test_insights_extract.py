@@ -752,3 +752,557 @@ class TestAggregateAll:
         assert "deepseek-r1" in model_names
         # deepseek-r1 has most calls (6), should be first
         assert agg.top_models[0][0] == "deepseek-r1"
+
+
+# ── V2 & Mixed Schema Insights Tests ──────────────────────────
+
+
+def _v2_user_data(text: str, time_ms: int) -> str:
+    return json.dumps({"text": text, "time": {"created": time_ms}})
+
+
+def _v2_asst_data(
+    *,
+    agent: str = "build",
+    model_id: str = "deepseek-v4",
+    provider_id: str = "opencode",
+    input_tok: int = 100,
+    output_tok: int = 50,
+    reasoning_tok: int = 0,
+    cost: float = 0.01,
+    time_ms: int = _BASE_MS,
+    content: list[dict[str, Any]] | None = None,
+) -> str:
+    return json.dumps(
+        {
+            "agent": agent,
+            "model": {"id": model_id, "providerID": provider_id},
+            "tokens": {
+                "input": input_tok,
+                "output": output_tok,
+                "reasoning": reasoning_tok,
+                "cache": {"read": 10, "write": 0},
+            },
+            "cost": cost,
+            "time": {"created": time_ms, "completed": time_ms + 100},
+            "content": content or [],
+        }
+    )
+
+
+@pytest.fixture()
+def v2_insights_db_path(tmp_path: Path) -> Path:
+    """Create a pure v2 database (no v1 tables) for insights tests."""
+    db_file = tmp_path / "opencode_v2_insights.db"
+    conn = sqlite3.connect(str(db_file))
+    conn.execute(
+        "CREATE TABLE session_v2 ("
+        "id TEXT PRIMARY KEY, project_id TEXT, parent_id TEXT, "
+        "title TEXT, time_created INTEGER, time_updated INTEGER)"
+    )
+    conn.execute(
+        "CREATE TABLE session_message ("
+        "id TEXT PRIMARY KEY, session_id TEXT, type TEXT, "
+        "seq INTEGER, time_created INTEGER, data TEXT)"
+    )
+    conn.execute(
+        "CREATE TABLE todo ("
+        "session_id TEXT, content TEXT, status TEXT, priority TEXT, position INTEGER)"
+    )
+    conn.execute("CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT, name TEXT)")
+
+    t = _BASE_MS
+    conn.executemany(
+        "INSERT INTO session_v2 VALUES (?,?,?,?,?,?)",
+        [
+            ("v2_s1", "proj_v2", None, "V2 Debug Session", t, t + 5 * _MINUTE),
+            ("v2_s_short", "proj_v2", None, "V2 Quick", t, t + 20 * _SECOND),
+            ("v2_s_few", "proj_v2", None, "V2 One Turn", t, t + 3 * _MINUTE),
+            ("v2_s_sub", "proj_v2", "v2_s1", "V2 Subtask", t, t + 2 * _MINUTE),
+        ],
+    )
+
+    msgs = [
+        # v2_s1: 2 user + 2 assistant + 1 aborted (0 tokens) + 1 compaction, span 5 min
+        ("m_u1", "v2_s1", "user", 1, t, _v2_user_data("Investigate v2 bug", t)),
+        (
+            "m_a1",
+            "v2_s1",
+            "assistant",
+            2,
+            t + _MINUTE,
+            _v2_asst_data(
+                agent="build",
+                model_id="deepseek-v4",
+                input_tok=120,
+                output_tok=80,
+                reasoning_tok=20,
+                cost=0.02,
+                time_ms=t + _MINUTE,
+                content=[
+                    {"type": "reasoning", "text": "Checking files"},
+                    {
+                        "type": "tool",
+                        "name": "read",
+                        "state": {"status": "completed", "input": {"filePath": "/app/main.py"}},
+                    },
+                    {
+                        "type": "tool",
+                        "name": "edit",
+                        "state": {"status": "completed", "input": {"path": "/app/ui.tsx"}},
+                    },
+                    {"type": "tool", "name": "bash", "state": {"status": "error", "input": {}}},
+                ],
+            ),
+        ),
+        (
+            "m_comp",
+            "v2_s1",
+            "compaction",
+            3,
+            t + 2 * _MINUTE,
+            json.dumps({"summary": "compacted"}),
+        ),
+        (
+            "m_u2",
+            "v2_s1",
+            "user",
+            4,
+            t + 3 * _MINUTE,
+            _v2_user_data("Looks good, finalize", t + 3 * _MINUTE),
+        ),
+        (
+            "m_a2",
+            "v2_s1",
+            "assistant",
+            5,
+            t + 5 * _MINUTE,
+            _v2_asst_data(
+                agent="explore",
+                model_id="gemma4",
+                input_tok=100,
+                output_tok=50,
+                cost=0.01,
+                time_ms=t + 5 * _MINUTE,
+                content=[{"type": "text", "text": "All checks pass in v2"}],
+            ),
+        ),
+        # Aborted assistant call (0 tokens) -> excluded from agent/model call counts
+        (
+            "m_a_abort",
+            "v2_s1",
+            "assistant",
+            6,
+            t + 5 * _MINUTE + _SECOND,
+            _v2_asst_data(
+                input_tok=0,
+                output_tok=0,
+                reasoning_tok=0,
+                cost=0.0,
+                time_ms=t + 5 * _MINUTE + _SECOND,
+            ),
+        ),
+        # v2_s_short: 2 user, < 1 min
+        ("ms_u1", "v2_s_short", "user", 1, t, _v2_user_data("Hi", t)),
+        (
+            "ms_u2",
+            "v2_s_short",
+            "user",
+            2,
+            t + 20 * _SECOND,
+            _v2_user_data("Bye", t + 20 * _SECOND),
+        ),
+        # v2_s_few: 1 user + 1 assistant, 3 min
+        ("mf_u1", "v2_s_few", "user", 1, t, _v2_user_data("One question", t)),
+        (
+            "mf_a1",
+            "v2_s_few",
+            "assistant",
+            2,
+            t + 3 * _MINUTE,
+            _v2_asst_data(
+                agent="oracle",
+                model_id="deepseek-v4",
+                input_tok=50,
+                output_tok=25,
+                cost=0.005,
+                time_ms=t + 3 * _MINUTE,
+            ),
+        ),
+        # v2_s_sub: child session
+        ("msub_u1", "v2_s_sub", "user", 1, t, _v2_user_data("Subtask prompt", t)),
+        (
+            "msub_a1",
+            "v2_s_sub",
+            "assistant",
+            2,
+            t + 2 * _MINUTE,
+            _v2_asst_data(
+                agent="oracle",
+                model_id="deepseek-v4",
+                input_tok=40,
+                output_tok=20,
+                cost=0.004,
+                time_ms=t + 2 * _MINUTE,
+            ),
+        ),
+    ]
+    conn.executemany("INSERT INTO session_message VALUES (?,?,?,?,?,?)", msgs)
+    conn.executemany(
+        "INSERT INTO todo VALUES (?,?,?,?,?)",
+        [
+            ("v2_s1", "Fix v2", "completed", "high", 0),
+            ("v2_s1", "Add tests", "pending", "medium", 1),
+        ],
+    )
+    conn.execute("INSERT INTO project VALUES (?,?,?)", ("proj_v2", "/repo/v2-proj", "v2-proj"))
+    conn.commit()
+    conn.close()
+    return db_file
+
+
+@pytest.fixture()
+def mixed_insights_db_path(tmp_path: Path) -> Path:
+    """Create a mixed v1+v2 database with disjoint, overlapping, and cross-table sessions."""
+    db_file = tmp_path / "opencode_mixed_insights.db"
+    conn = sqlite3.connect(str(db_file))
+    conn.execute(
+        "CREATE TABLE session ("
+        "id TEXT PRIMARY KEY, project_id TEXT, parent_id TEXT, "
+        "title TEXT, time_created INTEGER, time_updated INTEGER)"
+    )
+    conn.execute(
+        "CREATE TABLE message ("
+        "id TEXT PRIMARY KEY, session_id TEXT, data TEXT, time_created INTEGER)"
+    )
+    conn.execute(
+        "CREATE TABLE part ("
+        "id TEXT PRIMARY KEY, message_id TEXT, data TEXT, time_created INTEGER)"
+    )
+    conn.execute(
+        "CREATE TABLE session_v2 ("
+        "id TEXT PRIMARY KEY, project_id TEXT, parent_id TEXT, "
+        "title TEXT, time_created INTEGER, time_updated INTEGER)"
+    )
+    conn.execute(
+        "CREATE TABLE session_message ("
+        "id TEXT PRIMARY KEY, session_id TEXT, type TEXT, "
+        "seq INTEGER, time_created INTEGER, data TEXT)"
+    )
+    conn.execute("CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT, name TEXT)")
+
+    t = _BASE_MS
+    # 1. v1-only session (2 user msgs, 2 min)
+    conn.execute(
+        "INSERT INTO session VALUES (?,?,?,?,?,?)",
+        ("s_v1_only", "p1", None, "Legacy V1", t, t + 2 * _MINUTE),
+    )
+    conn.executemany(
+        "INSERT INTO message VALUES (?,?,?,?)",
+        [
+            ("v1_u1", "s_v1_only", _msg_data(role="user", cost=0, time_ms=t), t),
+            (
+                "v1_a1",
+                "s_v1_only",
+                _msg_data(
+                    agent="build",
+                    model="deepseek-r1",
+                    total_tok=150,
+                    cost=0.01,
+                    time_ms=t + _MINUTE,
+                ),
+                t + _MINUTE,
+            ),
+            (
+                "v1_u2",
+                "s_v1_only",
+                _msg_data(role="user", cost=0, time_ms=t + 2 * _MINUTE),
+                t + 2 * _MINUTE,
+            ),
+        ],
+    )
+    conn.executemany(
+        "INSERT INTO part VALUES (?,?,?,?)",
+        [
+            ("p_v1_u1", "v1_u1", _part_data(text="V1 prompt"), t),
+            (
+                "p_v1_t1",
+                "v1_a1",
+                _part_data(part_type="tool", tool="grep", status="completed"),
+                t + _MINUTE,
+            ),
+        ],
+    )
+
+    # 2. Migrated session present in BOTH session & session_v2, with:
+    #    - older v1-only msg,
+    #    - overlapping msg in BOTH message & session_message (same ID -> must deduplicate!),
+    #    - newer v2-only msg.
+    conn.execute(
+        "INSERT INTO session VALUES (?,?,?,?,?,?)",
+        ("s_migrated", "p1", None, "Migrated Session", t, t + 4 * _MINUTE),
+    )
+    conn.execute(
+        "INSERT INTO session_v2 VALUES (?,?,?,?,?,?)",
+        ("s_migrated", "p1", None, "Migrated Session", t, t + 4 * _MINUTE),
+    )
+    conn.executemany(
+        "INSERT INTO message VALUES (?,?,?,?)",
+        [
+            ("mig_u1", "s_migrated", _msg_data(role="user", cost=0, time_ms=t), t),
+            (
+                "mig_shared_a1",
+                "s_migrated",
+                _msg_data(
+                    agent="build",
+                    model="deepseek-r1",
+                    total_tok=200,
+                    cost=0.02,
+                    time_ms=t + _MINUTE,
+                ),
+                t + _MINUTE,
+            ),
+        ],
+    )
+    conn.executemany(
+        "INSERT INTO part VALUES (?,?,?,?)",
+        [
+            ("p_mig_u1", "mig_u1", _part_data(text="Start in v1"), t),
+            (
+                "p_mig_shared",
+                "mig_shared_a1",
+                _part_data(part_type="tool", tool="read", status="completed"),
+                t + _MINUTE,
+            ),
+        ],
+    )
+    conn.executemany(
+        "INSERT INTO session_message VALUES (?,?,?,?,?,?)",
+        [
+            (
+                "mig_shared_a1",
+                "s_migrated",
+                "assistant",
+                2,
+                t + _MINUTE,
+                _v2_asst_data(
+                    agent="build",
+                    model_id="deepseek-r1",
+                    input_tok=150,
+                    output_tok=50,
+                    cost=0.02,
+                    time_ms=t + _MINUTE,
+                    content=[
+                        {
+                            "type": "tool",
+                            "name": "read",
+                            "state": {"status": "completed", "input": {}},
+                        }
+                    ],
+                ),
+            ),
+            (
+                "mig_u2",
+                "s_migrated",
+                "user",
+                3,
+                t + 2 * _MINUTE,
+                _v2_user_data("Continue in v2", t + 2 * _MINUTE),
+            ),
+            (
+                "mig_v2_a2",
+                "s_migrated",
+                "assistant",
+                4,
+                t + 4 * _MINUTE,
+                _v2_asst_data(
+                    agent="explore",
+                    model_id="deepseek-v4",
+                    input_tok=100,
+                    output_tok=50,
+                    cost=0.03,
+                    time_ms=t + 4 * _MINUTE,
+                    content=[{"type": "text", "text": "Finished in v2"}],
+                ),
+            ),
+        ],
+    )
+
+    # 3. v2-only session
+    conn.execute(
+        "INSERT INTO session_v2 VALUES (?,?,?,?,?,?)",
+        ("s_v2_only", "p1", None, "Fresh V2", t + 10 * _MINUTE, t + 12 * _MINUTE),
+    )
+    conn.executemany(
+        "INSERT INTO session_message VALUES (?,?,?,?,?,?)",
+        [
+            (
+                "v2_u1",
+                "s_v2_only",
+                "user",
+                1,
+                t + 10 * _MINUTE,
+                _v2_user_data("First v2", t + 10 * _MINUTE),
+            ),
+            (
+                "v2_a1",
+                "s_v2_only",
+                "assistant",
+                2,
+                t + 11 * _MINUTE,
+                _v2_asst_data(
+                    agent="build",
+                    model_id="deepseek-v4",
+                    input_tok=80,
+                    output_tok=20,
+                    cost=0.01,
+                    time_ms=t + 11 * _MINUTE,
+                ),
+            ),
+            (
+                "v2_u2",
+                "s_v2_only",
+                "user",
+                3,
+                t + 12 * _MINUTE,
+                _v2_user_data("Second v2", t + 12 * _MINUTE),
+            ),
+        ],
+    )
+    conn.execute("INSERT INTO project VALUES (?,?,?)", ("p1", "/repo/shared", "shared"))
+    conn.commit()
+    conn.close()
+    return db_file
+
+
+class TestV2InsightsSupport:
+    def test_filter_sessions_v2(self, v2_insights_db_path: Path):
+        sids = filter_sessions(v2_insights_db_path, since=None)
+        assert sids == ["v2_s1"]
+
+    def test_filter_sessions_v2_seconds_timestamps(self, tmp_path: Path):
+        db_file = tmp_path / "v2_sec.db"
+        conn = sqlite3.connect(str(db_file))
+        conn.execute(
+            "CREATE TABLE session_v2 (id TEXT PRIMARY KEY, project_id TEXT, "
+            "parent_id TEXT, title TEXT, time_created INTEGER)"
+        )
+        conn.execute(
+            "CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, "
+            "type TEXT, seq INTEGER, time_created INTEGER, data TEXT)"
+        )
+        t_sec = _BASE_MS // 1000
+        conn.execute(
+            "INSERT INTO session_v2 VALUES (?,?,?,?,?)", ("s_sec", None, None, "Sec", t_sec)
+        )
+        conn.executemany(
+            "INSERT INTO session_message VALUES (?,?,?,?,?,?)",
+            [
+                ("u1", "s_sec", "user", 1, t_sec, _v2_user_data("First", t_sec)),
+                ("a1", "s_sec", "assistant", 2, t_sec + 30, _v2_asst_data(time_ms=t_sec + 30)),
+                ("u2", "s_sec", "user", 3, t_sec + 120, _v2_user_data("Second", t_sec + 120)),
+            ],
+        )
+        conn.commit()
+        conn.close()
+
+        past = datetime.fromtimestamp(t_sec - 60, tz=timezone.utc)
+        assert filter_sessions(db_file, since=past) == ["s_sec"]
+        meta = extract_session_meta(db_file, "s_sec")
+        assert meta.duration_minutes == pytest.approx(2.0)
+
+    def test_extract_session_meta_v2(self, v2_insights_db_path: Path):
+        meta = extract_session_meta(v2_insights_db_path, "v2_s1")
+        assert meta.title == "V2 Debug Session"
+        assert meta.user_msg_count == 2
+        assert meta.assistant_msg_count == 3
+        assert meta.input_tokens == 220
+        assert meta.output_tokens == 130
+        assert meta.total_tokens == 370  # 120+80+20 + 100+50+0
+        assert meta.cost == pytest.approx(0.03)
+        assert meta.agent_counts == {"build": 2, "explore": 1}
+        assert meta.model_counts == {"deepseek-v4": 2, "gemma4": 1}
+        assert meta.tool_counts == {"read": 1, "edit": 1, "bash": 1}
+        assert meta.languages == {"py": 1, "tsx": 1}
+        assert meta.project_path == "/repo/v2-proj"
+
+    def test_reconstruct_transcript_v2(self, v2_insights_db_path: Path):
+        transcript = reconstruct_transcript(v2_insights_db_path, "v2_s1")
+        assert "[user]: Investigate v2 bug" in transcript
+        assert "[assistant]: (reasoning) Checking files" in transcript
+        assert "[assistant]: Used read (completed)" in transcript
+        assert "[assistant]: Used bash (error)" in transcript
+        assert "[user]: Looks good, finalize" in transcript
+        assert "[assistant]: All checks pass in v2" in transcript
+        assert transcript.index("Investigate v2 bug") < transcript.index("All checks pass in v2")
+
+    def test_stats_and_aggregate_v2(self, v2_insights_db_path: Path):
+        agent_stats = extract_agent_stats(v2_insights_db_path, since=None)
+        assert agent_stats["build"]["calls"] == 1
+        assert agent_stats["build"]["tokens"] == 220
+        assert agent_stats["explore"]["calls"] == 1
+        assert agent_stats["oracle"]["calls"] == 2
+
+        model_stats = extract_model_stats(v2_insights_db_path, since=None)
+        assert model_stats["deepseek-v4"]["calls"] == 3
+        assert model_stats["gemma4"]["calls"] == 1
+
+        tool_stats = extract_tool_stats(v2_insights_db_path, since=None)
+        assert tool_stats["read"] == {"completed": 1, "errors": 0, "total": 1}
+        assert tool_stats["bash"] == {"completed": 0, "errors": 1, "total": 1}
+
+        assert extract_todo_stats(v2_insights_db_path, since=None) == {"completed": 1, "pending": 1}
+        deleg = extract_delegation_stats(v2_insights_db_path, since=None)
+        assert deleg["root_sessions"] == 3
+        assert deleg["sub_sessions"] == 1
+        assert deleg["max_depth"] == 1
+        assert extract_project_stats(v2_insights_db_path, since=None) == {"/repo/v2-proj": 4}
+
+        agg = aggregate_all(v2_insights_db_path, ["v2_s1"], since=None)
+        assert agg.total_sessions == 1
+        assert agg.total_messages == 11  # 6 user + 5 assistant across all v2 sessions
+        assert agg.total_cost == pytest.approx(0.039)
+
+
+class TestMixedInsightsSupport:
+    def test_filter_sessions_mixed_deduplicates_sessions(self, mixed_insights_db_path: Path):
+        sids = sorted(filter_sessions(mixed_insights_db_path, since=None))
+        assert sids == ["s_migrated", "s_v1_only", "s_v2_only"]
+
+    def test_migrated_session_merges_v1_and_v2_without_double_counting(
+        self, mixed_insights_db_path: Path
+    ):
+        meta = extract_session_meta(mixed_insights_db_path, "s_migrated")
+        assert meta.user_msg_count == 2
+        assert meta.assistant_msg_count == 2
+        assert meta.total_tokens == 350  # 200 (deduped shared) + 150 (v2)
+        assert meta.cost == pytest.approx(0.05)
+        assert meta.tool_counts == {"read": 1}  # deduped: not counted twice
+
+        transcript = reconstruct_transcript(mixed_insights_db_path, "s_migrated")
+        assert transcript.count("Used read (completed)") == 1
+        assert "[user]: Start in v1" in transcript
+        assert "[user]: Continue in v2" in transcript
+        assert "[assistant]: Finished in v2" in transcript
+        assert (
+            transcript.index("Start in v1")
+            < transcript.index("Continue in v2")
+            < transcript.index("Finished in v2")
+        )
+
+    def test_stats_and_aggregate_mixed(self, mixed_insights_db_path: Path):
+        agent_stats = extract_agent_stats(mixed_insights_db_path, since=None)
+        assert agent_stats["build"]["calls"] == 3  # v1_a1 + mig_shared_a1 + v2_a1
+        assert agent_stats["explore"]["calls"] == 1
+        tool_stats = extract_tool_stats(mixed_insights_db_path, since=None)
+        assert tool_stats["grep"]["total"] == 1
+        assert tool_stats["read"]["total"] == 1
+        assert extract_project_stats(mixed_insights_db_path, since=None) == {"/repo/shared": 3}
+
+        agg = aggregate_all(
+            mixed_insights_db_path,
+            ["s_v1_only", "s_migrated", "s_v2_only"],
+            since=None,
+        )
+        assert agg.total_messages == 10  # 3 + 4 + 3 user/assistant messages
+        assert agg.total_cost == pytest.approx(0.07)

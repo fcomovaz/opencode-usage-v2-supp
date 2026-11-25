@@ -209,3 +209,98 @@ class TestFullReport:
         html = generate_report(empty_data)
         assert isinstance(html, str)
         assert "<!DOCTYPE html>" in html
+
+    def test_generate_report_renders_llm_prompt_schemas(self):
+        """Renders the actual JSON shapes returned by prompts.py without raw dict/list reprs."""
+        prompt_shaped_data = {
+            "at_a_glance": {
+                "whats_working": ["Fast search", "Clean edits"],
+                "whats_hindering": ["Path typos"],
+                "quick_wins": [
+                    {"action": "Add AGENTS.md rule", "impact": "Fewer retries", "effort": "low"}
+                ],
+                "ambitious_workflows": ["Automate CI triage"],
+            },
+            "project_areas": {
+                "areas": [{"name": "CLI", "session_count": 3, "description": "V2 support"}]
+            },
+            "interaction_style": {
+                "narrative": "Direct and iterative.",
+                "key_patterns": ["Short feedback loops", "Verifies tests"],
+                "strengths": ["Clear specs"],
+                "growth_areas": ["Smaller diffs"],
+            },
+            "agent_performance": {
+                "top_performers": [
+                    {"agent": "build", "strength": "Fast edits", "usage_pattern": "Primary"}
+                ],
+                "cost_insights": ["Mostly free models"],
+                "model_pairing_tips": ["Use flash for facets"],
+                "efficiency_opportunities": ["Batch tool calls"],
+            },
+            "friction": {
+                "top_friction_categories": [
+                    {
+                        "category": "tool_failed",
+                        "frequency": "medium",
+                        "description": "Missing file path",
+                        "examples": ["read failed"],
+                    }
+                ],
+                "root_causes": ["Stale paths"],
+                "quick_fixes": ["Check paths with glob first"],
+            },
+            "suggestions": {
+                "agents_md_additions": [
+                    {"rule": "Run pytest before commit", "rationale": "Catch regressions"}
+                ],
+                "skill_candidates": [
+                    {
+                        "name": "schema-migrator",
+                        "description": "Migrate SQLite queries",
+                        "trigger_phrases": ["migrate schema"],
+                    }
+                ],
+                "workflow_patterns": [
+                    {
+                        "pattern": "TDD first",
+                        "benefit": "Fewer bugs",
+                        "how_to": "Write test before edit",
+                    }
+                ],
+            },
+            "tool_health": {
+                "problematic_tools": [
+                    {
+                        "tool": "bash",
+                        "error_rate": "10%",
+                        "likely_cause": "Bad flags",
+                        "fix": "Check --help",
+                    }
+                ],
+                "efficiency_tips": ["Batch commands"],
+                "recovery_patterns": ["Retry with fallback"],
+            },
+            "horizon": {
+                "automation_opportunities": [
+                    {
+                        "opportunity": "Nightly reports",
+                        "how": "opencode run",
+                        "effort": "low",
+                    }
+                ],
+                "skill_gaps": ["Release automation"],
+                "workflow_evolutions": ["Parallel agents"],
+            },
+            "aggregated_stats": MOCK_INSIGHTS_DATA["aggregated_stats"],
+            "delegation_stats": MOCK_INSIGHTS_DATA["delegation_stats"],
+        }
+        html = generate_report(prompt_shaped_data)
+        assert "Fast search" in html
+        assert "Add AGENTS.md rule" in html
+        assert "tool_failed" in html
+        assert "Run pytest before commit" in html
+        assert "schema-migrator" in html
+        assert "Nightly reports" in html
+        assert "{'action':" not in html
+        assert "['Fast search'" not in html

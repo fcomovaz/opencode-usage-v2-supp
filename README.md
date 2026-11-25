@@ -115,9 +115,9 @@ opencode-usage-v2 insights --days 30 --concurrency 4 --output report.html
 opencode-usage-v2 insights --force
 ```
 
-Requires an API key for the LLM provider — set via environment variable (e.g. `OPENAI_API_KEY`) or OpenCode's `auth.json`.
+Requires the `opencode` CLI installed with at least one configured model provider.
 
-> **Note:** The `insights` extraction queries currently target the legacy v1 schema tables (`session`, `message`, `part`). Token usage reporting (`run`) supports both v1 and v2 schemas.
+> **Note:** Both `run` and `insights` support OpenCode v1, v2, and migrated mixed SQLite schemas.
 
 ### Example output
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from html import escape
 from typing import Any
 
 from opencode_usage.insights.types import AggregatedStats
@@ -362,6 +363,52 @@ def _fmt_date_range(date_range: tuple[int, int]) -> str:
         return "\u2014"
 
 
+def _fmt_entry(item: Any, keys: tuple[str, ...] = ()) -> str:
+    """Format either a plain string or a structured dict entry safely for HTML."""
+    if isinstance(item, dict):
+        parts: list[str] = []
+        used: set[str] = set()
+        for k in keys:
+            val = item.get(k)
+            if val:
+                parts.append(escape(str(val)))
+                used.add(k)
+        for k, val in item.items():
+            if k not in used and val:
+                if isinstance(val, list):
+                    val = ", ".join(str(v) for v in val)
+                parts.append(escape(str(val)))
+        return " — ".join(parts)
+    return escape(str(item))
+
+
+def _render_card_or_bullets(
+    title: str,
+    value: Any,
+    accent_color: str,
+    keys: tuple[str, ...] = (),
+) -> str:
+    """Render a scalar string or list of entries inside a styled card."""
+    if not value:
+        return ""
+    if isinstance(value, list):
+        items = "".join(f"<li>{_fmt_entry(v, keys)}</li>" for v in value)
+        return (
+            f'<div class="card accent-card" style="border-left-color:{accent_color};'
+            f'border-left-width:3px;border-left-style:solid">'
+            f'<h3>{escape(title)}</h3><ul class="list-items">{items}</ul></div>'
+        )
+    return render_card(escape(title), escape(str(value)), accent_color)
+
+
+def _render_bullets_block(heading: str, items: list[Any], keys: tuple[str, ...] = ()) -> str:
+    """Render a subheading + bullet list when *items* is non-empty."""
+    if not items:
+        return ""
+    lis = "".join(f"<li>{_fmt_entry(it, keys)}</li>" for it in items)
+    return f'<h3>{escape(heading)}</h3><ul class="list-items">{lis}</ul>'
+
+
 def generate_report(insights_data: dict[str, Any]) -> str:
     """Assemble the full 9-section terminal-style HTML report."""
     stats: AggregatedStats = insights_data.get("aggregated_stats") or AggregatedStats(
@@ -420,18 +467,14 @@ def generate_report(insights_data: dict[str, Any]) -> str:
         hindering = at_a_glance.get("whats_hindering", "")
         quick_wins = at_a_glance.get("quick_wins") or []
         ambitious = at_a_glance.get("ambitious_workflows") or []
-        wins_html = ""
-        if quick_wins:
-            items = "".join(f"<li>{w}</li>" for w in quick_wins)
-            wins_html = f'<h3>Quick Wins</h3><ul class="list-items">{items}</ul>'
-        amb_html = ""
-        if ambitious:
-            items = "".join(f"<li>{a}</li>" for a in ambitious)
-            amb_html = f'<h3>Ambitious Workflows</h3><ul class="list-items">{items}</ul>'
+        wins_html = _render_bullets_block(
+            "Quick Wins", quick_wins, keys=("action", "impact", "effort")
+        )
+        amb_html = _render_bullets_block("Ambitious Workflows", ambitious)
         aag_content = (
             stats_html
-            + (render_card("What's Working", working, "#3fb950") if working else "")
-            + (render_card("What's Hindering", hindering, "#f85149") if hindering else "")
+            + _render_card_or_bullets("What's Working", working, "#3fb950")
+            + _render_card_or_bullets("What's Hindering", hindering, "#f85149")
             + wins_html
             + amb_html
         )
@@ -447,8 +490,9 @@ def generate_report(insights_data: dict[str, Any]) -> str:
     if areas:
         area_cards = "".join(
             render_card(
-                a.get("name", ""),
-                f"{a.get('session_count', 0)} sessions \u2014 {a.get('description', '')}",
+                escape(str(a.get("name", ""))),
+                f"{a.get('session_count', 0)} sessions \u2014 "
+                f"{escape(str(a.get('description', '')))}",
                 "#58a6ff",
             )
             for a in areas
@@ -462,9 +506,33 @@ def generate_report(insights_data: dict[str, Any]) -> str:
     agent_items = [(a, float(c), "#3fb950") for a, c in stats.top_agents]
     agent_chart = render_bar_chart("Agent Usage (calls)", agent_items) if agent_items else ""
     agent_insight = agent_performance.get("insights", "")
-    s3_content = agent_chart + (
-        f'<div class="card"><p>{agent_insight}</p></div>' if agent_insight else ""
+    s3_parts = [agent_chart]
+    if agent_insight:
+        s3_parts.append(f'<div class="card"><p>{escape(str(agent_insight))}</p></div>')
+    for performer in agent_performance.get("top_performers") or []:
+        if isinstance(performer, dict):
+            summary = f"{performer.get('strength', '')} — {performer.get('usage_pattern', '')}"
+            s3_parts.append(
+                render_card(
+                    escape(str(performer.get("agent", ""))),
+                    escape(summary.strip(" —")),
+                    "#3fb950",
+                )
+            )
+    s3_parts.append(
+        _render_bullets_block("Cost Insights", agent_performance.get("cost_insights") or [])
     )
+    s3_parts.append(
+        _render_bullets_block(
+            "Model Pairing Tips", agent_performance.get("model_pairing_tips") or []
+        )
+    )
+    s3_parts.append(
+        _render_bullets_block(
+            "Efficiency Opportunities", agent_performance.get("efficiency_opportunities") or []
+        )
+    )
+    s3_content = "".join(s3_parts)
     s3 = render_section("agent-performance", "Agent Performance", s3_content)
 
     # Section 4: Cost Intelligence
@@ -481,20 +549,36 @@ def generate_report(insights_data: dict[str, Any]) -> str:
     # Section 5: Interaction & Friction
     narrative_text = interaction_style.get("narrative", "")
     key_pattern = interaction_style.get("key_pattern", "")
-    narrative_html = render_narrative([narrative_text], key_pattern) if narrative_text else ""
-    friction_cats = friction.get("categories") or []
+    if not key_pattern and interaction_style.get("key_patterns"):
+        key_pattern = " · ".join(str(p) for p in interaction_style["key_patterns"])
+    narrative_html = (
+        render_narrative([escape(str(narrative_text))], escape(str(key_pattern)))
+        if narrative_text
+        else ""
+    )
+    style_extras = _render_bullets_block(
+        "Strengths", interaction_style.get("strengths") or []
+    ) + _render_bullets_block("Growth Areas", interaction_style.get("growth_areas") or [])
+    friction_cats = friction.get("categories") or friction.get("top_friction_categories") or []
     friction_html = ""
     if friction_cats:
         cards = "".join(
             render_card(
-                c.get("name", ""),
-                f"Count: {c.get('count', 0)} \u2014 {c.get('example', '')}",
+                escape(str(c.get("name") or c.get("category") or "")),
+                escape(
+                    f"Count: {c['count']} \u2014 {c.get('example', '')}"
+                    if "count" in c
+                    else f"[{c.get('frequency', '')}] {c.get('description', '')}"
+                ),
                 "#f85149",
             )
             for c in friction_cats
         )
         friction_html = f"<h3>Friction Patterns</h3>{cards}"
-    s5_content = narrative_html + friction_html or (
+    friction_extras = _render_bullets_block(
+        "Root Causes", friction.get("root_causes") or []
+    ) + _render_bullets_block("Quick Fixes", friction.get("quick_fixes") or [])
+    s5_content = (narrative_html + style_extras + friction_html + friction_extras) or (
         '<p style="color:var(--text-muted)">No interaction data available</p>'
     )
     s5 = render_section("interaction-friction", "Interaction &amp; Friction", s5_content)
@@ -505,14 +589,21 @@ def generate_report(insights_data: dict[str, Any]) -> str:
     workflows = suggestions.get("workflow_patterns") or []
     s6_parts = []
     if agents_md:
-        items = "".join(f"<li>{s}</li>" for s in agents_md)
-        s6_parts.append(f'<h3>AGENTS.md Additions</h3><ul class="list-items">{items}</ul>')
+        s6_parts.append(
+            _render_bullets_block("AGENTS.md Additions", agents_md, keys=("rule", "rationale"))
+        )
     if skills:
-        tags = "".join(f'<span class="tag">{s}</span>' for s in skills)
+        tags = "".join(
+            f'<span class="tag">{_fmt_entry(s, keys=("name", "description"))}</span>'
+            for s in skills
+        )
         s6_parts.append(f"<h3>Skill Candidates</h3><p>{tags}</p>")
     if workflows:
-        items = "".join(f"<li>{w}</li>" for w in workflows)
-        s6_parts.append(f'<h3>Workflow Patterns</h3><ul class="list-items">{items}</ul>')
+        s6_parts.append(
+            _render_bullets_block(
+                "Workflow Patterns", workflows, keys=("pattern", "benefit", "how_to")
+            )
+        )
     s6_content = "".join(s6_parts) or (
         '<p style="color:var(--text-muted)">No suggestions available</p>'
     )
@@ -537,28 +628,55 @@ def generate_report(insights_data: dict[str, Any]) -> str:
     tool_items = [(t, float(c), "#d29922") for t, c in stats.top_tools]
     tool_chart = render_bar_chart("Tool Usage (calls)", tool_items) if tool_items else ""
     tool_insight = tool_health.get("insights", "")
-    tool_tips = tool_health.get("tips") or []
-    tips_html = ""
-    if tool_tips:
-        items = "".join(f"<li>{t}</li>" for t in tool_tips)
-        tips_html = f'<ul class="list-items">{items}</ul>'
+    tool_tips = tool_health.get("tips") or tool_health.get("efficiency_tips") or []
+    prob_cards = "".join(
+        render_card(
+            escape(str(p.get("tool", ""))),
+            escape(
+                f"Error rate: {p.get('error_rate', '')} — "
+                f"{p.get('likely_cause', '')} (Fix: {p.get('fix', '')})"
+            ),
+            "#d29922",
+        )
+        for p in (tool_health.get("problematic_tools") or [])
+        if isinstance(p, dict)
+    )
+    tips_html = _render_bullets_block("Efficiency Tips", tool_tips)
+    recovery_html = _render_bullets_block(
+        "Recovery Patterns", tool_health.get("recovery_patterns") or []
+    )
     s8_content = (
         tool_chart
-        + (f'<div class="card"><p>{tool_insight}</p></div>' if tool_insight else "")
+        + (f'<div class="card"><p>{escape(str(tool_insight))}</p></div>' if tool_insight else "")
+        + prob_cards
         + tips_html
+        + recovery_html
     )
     s8 = render_section("tool-health", "Tool Health", s8_content)
 
     # Section 9: On the Horizon
-    opportunities = horizon.get("opportunities") or []
+    opportunities = horizon.get("opportunities") or horizon.get("automation_opportunities") or []
+    s9_parts: list[str] = []
     if opportunities:
         opp_cards = "".join(
-            render_card(o.get("title", ""), o.get("description", ""), "#bc8cff")
+            render_card(
+                escape(str(o.get("title") or o.get("opportunity") or "")),
+                escape(
+                    str(o.get("description") or o.get("how") or "")
+                    + (f" (effort: {o['effort']})" if o.get("effort") else "")
+                ),
+                "#bc8cff",
+            )
             for o in opportunities
         )
-        s9_content = opp_cards
-    else:
-        s9_content = '<p style="color:var(--text-muted)">No horizon data available</p>'
+        s9_parts.append(opp_cards)
+    s9_parts.append(_render_bullets_block("Skill Gaps", horizon.get("skill_gaps") or []))
+    s9_parts.append(
+        _render_bullets_block("Workflow Evolutions", horizon.get("workflow_evolutions") or [])
+    )
+    s9_content = "".join(s9_parts) or (
+        '<p style="color:var(--text-muted)">No horizon data available</p>'
+    )
     s9 = render_section("horizon", "On the Horizon", s9_content)
 
     footer_html = (

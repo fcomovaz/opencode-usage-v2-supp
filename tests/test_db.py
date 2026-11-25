@@ -1158,3 +1158,175 @@ class TestMixedSchemaSupport:
 
         sessions = {r.label for r in db.by_session()}
         assert sessions == {"V1 Disjoint Session", "V2 Disjoint Session"}
+
+
+class TestDbInsightsV2AndTimeFilter:
+    def test_cache_efficiency_and_cost_per_1k_with_since_on_v1(
+        self, insights_db_path: Path
+    ) -> None:
+        """Passing since/until does not crash with missing src.time_created_ms."""
+        db = OpenCodeDB(db_path=insights_db_path)
+        since = datetime.now(tz=timezone.utc) - timedelta(days=1)
+        eff = db.cache_efficiency(since=since)
+        assert "deepseek-r1" in eff
+        cost_1k = db.cost_per_1k_tokens(since=since)
+        assert "deepseek-r1" in cost_1k
+        # Future filter excludes all messages
+        future = datetime.now(tz=timezone.utc) + timedelta(days=1)
+        assert db.cache_efficiency(since=future) == {}
+        assert db.cost_per_1k_tokens(since=future) == {}
+        meta_future = db.session_meta(since=future)
+        assert all(m.total_tokens == 0 for m in meta_future)
+
+    def test_tool_error_rates_supports_string_tool_format_in_v1(self, tmp_path: Path) -> None:
+        """Real v1 DB stores $.tool as a plain string rather than $.tool.name."""
+        path = tmp_path / "v1_str_tool.db"
+        conn = sqlite3.connect(str(path))
+        conn.execute(
+            "CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, "
+            "session_id TEXT, time_created INTEGER, data TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO part VALUES (?,?,?,?,?)",
+            (
+                "p1",
+                "m1",
+                "s1",
+                1_700_000_000_000,
+                json.dumps({"type": "tool", "tool": "read", "state": {"status": "completed"}}),
+            ),
+        )
+        conn.execute(
+            "INSERT INTO part VALUES (?,?,?,?,?)",
+            (
+                "p2",
+                "m1",
+                "s1",
+                1_700_000_000_001,
+                json.dumps({"type": "tool", "tool": "read", "state": {"status": "error"}}),
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        rates = OpenCodeDB(db_path=path).tool_error_rates()
+        assert rates["read"] == pytest.approx(0.5)
+
+    def test_v2_db_insights_methods(self, tmp_path: Path) -> None:
+        """All OpenCodeDB insights helpers work on pure v2 databases."""
+        path = tmp_path / "v2_db_insights.db"
+        conn = sqlite3.connect(str(path))
+        conn.execute(
+            "CREATE TABLE session_v2 (id TEXT PRIMARY KEY, parent_id TEXT, "
+            "title TEXT, time_created INTEGER, time_updated INTEGER)"
+        )
+        conn.execute(
+            "CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, "
+            "type TEXT, seq INTEGER, time_created INTEGER, data TEXT)"
+        )
+        now_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
+        conn.executemany(
+            "INSERT INTO session_v2 VALUES (?,?,?,?,?)",
+            [
+                ("s1", None, "Parent V2", now_ms - 5000, now_ms),
+                ("s2", "s1", "Child V2", now_ms - 2000, now_ms),
+            ],
+        )
+        conn.executemany(
+            "INSERT INTO session_message VALUES (?,?,?,?,?,?)",
+            [
+                (
+                    "u1",
+                    "s1",
+                    "user",
+                    1,
+                    now_ms - 5000,
+                    json.dumps({"text": "Hello v2", "time": {"created": now_ms - 5000}}),
+                ),
+                (
+                    "a1",
+                    "s1",
+                    "assistant",
+                    2,
+                    now_ms - 4000,
+                    json.dumps(
+                        {
+                            "agent": "build",
+                            "model": {"id": "deepseek-v4", "providerID": "opencode"},
+                            "cost": 0.02,
+                            "tokens": {
+                                "input": 100,
+                                "output": 100,
+                                "reasoning": 0,
+                                "cache": {"read": 100, "write": 0},
+                            },
+                            "time": {"created": now_ms - 4000},
+                            "content": [
+                                {"type": "reasoning", "text": "Thinking v2"},
+                                {
+                                    "type": "tool",
+                                    "name": "bash",
+                                    "state": {"status": "completed", "input": "ls"},
+                                },
+                                {
+                                    "type": "tool",
+                                    "name": "bash",
+                                    "state": {"status": "error", "input": "bad"},
+                                },
+                                {"type": "text", "text": "Done v2"},
+                            ],
+                        }
+                    ),
+                ),
+                (
+                    "a2",
+                    "s2",
+                    "assistant",
+                    1,
+                    now_ms - 1000,
+                    json.dumps(
+                        {
+                            "agent": "explore",
+                            "model": {"id": "gemma4", "providerID": "opencode"},
+                            "cost": 0.01,
+                            "tokens": {
+                                "input": 50,
+                                "output": 50,
+                                "reasoning": 0,
+                                "cache": {"read": 0, "write": 0},
+                            },
+                            "time": {"created": now_ms - 1000},
+                            "content": [{"type": "text", "text": "Sub done"}],
+                        }
+                    ),
+                ),
+            ],
+        )
+        conn.commit()
+        conn.close()
+
+        db = OpenCodeDB(db_path=path)
+        meta = {m.session_id: m for m in db.session_meta()}
+        assert meta["s1"].total_tokens == 200
+        assert meta["s2"].parent_id == "s1"
+
+        eff = db.cache_efficiency()
+        assert eff["deepseek-v4"] == pytest.approx(0.5)
+        assert eff["gemma4"] == pytest.approx(0.0)
+
+        cost_1k = db.cost_per_1k_tokens()
+        assert cost_1k["deepseek-v4"] == pytest.approx(0.1)
+
+        rates = db.tool_error_rates()
+        assert rates["bash"] == pytest.approx(0.5)
+
+        deleg = db.agent_delegation()
+        assert deleg == {"build": ["explore"]}
+
+        transcript = db.build_transcript("s1")
+        assert "[text]: Hello v2" in transcript
+        assert "[thinking]: Thinking v2" in transcript
+        assert "[tool:bash]" in transcript
+        assert "[text]: Done v2" in transcript
+
+        assert db.session_user_messages("s1") == ["Hello v2"]

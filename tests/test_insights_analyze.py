@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from opencode_usage.insights.analyze import (
+    _supports_standalone,
     extract_facets,
     extract_json_from_response,
     generate_at_a_glance,
@@ -125,6 +126,11 @@ class TestExtractJsonFromResponse:
         result = extract_json_from_response(text)
         assert result["outer"]["inner"] == [1, 2, 3]
 
+    def test_extracts_fenced_json_with_surrounding_prose(self):
+        text = 'Here is the analysis:\n```json\n{"key": "value"}\n```\nDone.'
+        result = extract_json_from_response(text)
+        assert result == {"key": "value"}
+
 
 # ── run_llm ──────────────────────────────────────────────────────────────────
 
@@ -139,7 +145,10 @@ class TestRunLlm:
 
     def test_calls_subprocess_with_correct_args(self):
         ndjson = '{"type":"text","part":{"text":"{\\"result\\": true}"}}\n'
-        with patch("subprocess.run", return_value=self._make_result(stdout=ndjson)) as mock_run:
+        with (
+            patch("opencode_usage.insights.analyze._supports_standalone", return_value=True),
+            patch("subprocess.run", return_value=self._make_result(stdout=ndjson)) as mock_run,
+        ):
             run_llm("analyze this", model="opencode/test-model")
             args = mock_run.call_args[0][0]
             assert args[0] == "opencode"
@@ -149,8 +158,51 @@ class TestRunLlm:
             assert "json" in args
             assert "--model" in args
             assert "opencode/test-model" in args
-            assert "--dir" in args
-            assert args[args.index("--dir") + 1] == tempfile.gettempdir()
+            assert "--standalone" in args
+            assert "--dir" not in args
+            assert mock_run.call_args.kwargs.get("cwd") == tempfile.gettempdir()
+            assert mock_run.call_args.kwargs.get("stdin") == subprocess.DEVNULL
+
+    def test_supports_standalone_detects_v2_help_flag(self):
+        _supports_standalone.cache_clear()
+        help_res = self._make_result(stdout="  --standalone  Run with private server\n")
+        with (
+            patch("shutil.which", return_value="/usr/bin/opencode"),
+            patch("subprocess.run", return_value=help_res),
+        ):
+            assert _supports_standalone() is True
+        _supports_standalone.cache_clear()
+        v1_res = self._make_result(stdout="  --dir  Directory\n")
+        with (
+            patch("shutil.which", return_value="/usr/bin/opencode"),
+            patch("subprocess.run", return_value=v1_res),
+        ):
+            assert _supports_standalone() is False
+        _supports_standalone.cache_clear()
+
+    def test_surfaces_stdout_json_error_when_stderr_empty(self):
+        err_ndjson = (
+            '{"type":"error","timestamp":1795649659308,'
+            '"error":{"type":"provider.no-route","message":"Model unavailable: bad/model"}}\n'
+        )
+        mock_result = self._make_result(returncode=1, stdout=err_ndjson, stderr="")
+        with (
+            patch("subprocess.run", return_value=mock_result),
+            pytest.raises(RuntimeError, match="Model unavailable: bad/model"),
+        ):
+            run_llm("prompt", model="bad/model")
+
+    def test_raises_runtime_error_on_error_event_with_zero_exit(self):
+        err_ndjson = (
+            '{"type":"error","timestamp":1795649659308,'
+            '"error":{"type":"provider.no-route","message":"Model unavailable: bad/model"}}\n'
+        )
+        mock_result = self._make_result(returncode=0, stdout=err_ndjson, stderr="")
+        with (
+            patch("subprocess.run", return_value=mock_result),
+            pytest.raises(RuntimeError, match="Model unavailable: bad/model"),
+        ):
+            run_llm("prompt", model="bad/model")
 
     def test_raises_file_not_found_on_127(self):
         with (
