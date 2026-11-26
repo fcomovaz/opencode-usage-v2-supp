@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.6](https://github.com/fcomovaz/opencode-usage-v2-supp/compare/v0.2.5...v0.2.6) (2026-11-26)
+
+
+### Features
+
+* **insights:** support OpenCode v2 and mixed schemas ([7c7a302](https://github.com/fcomovaz/opencode-usage-v2-supp/commit/7c7a302ba14673f445e742cb687f4e4811996352))
+
+
+### Bug Fixes
+
+* **test:** use local date in test_v2_daily to match SQLite localtime ([b9fec04](https://github.com/fcomovaz/opencode-usage-v2-supp/commit/b9fec04bad79b06d5d11c8898adfcddec0a1dd37))
+
 ## [0.2.5](https://github.com/fcomovaz/opencode-usage-v2-supp/compare/v0.2.4...v0.2.5) (2026-11-24)
 
 
