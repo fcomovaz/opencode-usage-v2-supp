@@ -1062,7 +1062,7 @@ class TestV2SchemaSupport:
         assert len(rows) == 2
         for r in rows:
             assert "-" in r.label
-        today_str = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+        today_str = datetime.now().astimezone().strftime("%Y-%m-%d")
         today_row = next(r for r in rows if r.label == today_str)
         assert today_row.calls == 2
         assert today_row.tokens.total == 400
