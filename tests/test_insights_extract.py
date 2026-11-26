@@ -976,8 +976,7 @@ def mixed_insights_db_path(tmp_path: Path) -> Path:
         "id TEXT PRIMARY KEY, session_id TEXT, data TEXT, time_created INTEGER)"
     )
     conn.execute(
-        "CREATE TABLE part ("
-        "id TEXT PRIMARY KEY, message_id TEXT, data TEXT, time_created INTEGER)"
+        "CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, data TEXT, time_created INTEGER)"
     )
     conn.execute(
         "CREATE TABLE session_v2 ("

@@ -476,8 +476,7 @@ class OpenCodeDB:
             )
         if not parts:
             return (
-                "SELECT NULL AS id, NULL AS title, NULL AS parent_id, "
-                "0 AS time_updated WHERE 1 = 0"
+                "SELECT NULL AS id, NULL AS title, NULL AS parent_id, 0 AS time_updated WHERE 1 = 0"
             )
         return " UNION ALL ".join(parts)
 
@@ -653,11 +652,7 @@ class OpenCodeDB:
                             _record(name if isinstance(name, str) else None, status)
 
             if "part" in tables:
-                dedup = (
-                    "AND message_id NOT IN (SELECT id FROM session_message)"
-                    if has_v2
-                    else ""
-                )
+                dedup = "AND message_id NOT IN (SELECT id FROM session_message)" if has_v2 else ""
                 part_rows = conn.execute(
                     f"""
                     SELECT data FROM part
@@ -673,22 +668,14 @@ class OpenCodeDB:
                     if not isinstance(d, dict):
                         continue
                     tool_val = d.get("tool")
-                    name = (
-                        tool_val.get("name")
-                        if isinstance(tool_val, dict)
-                        else tool_val
-                    )
+                    name = tool_val.get("name") if isinstance(tool_val, dict) else tool_val
                     state = d.get("state")
                     status = state.get("status") if isinstance(state, dict) else None
                     _record(name if isinstance(name, str) else None, status)
         finally:
             conn.close()
 
-        return {
-            name: errors.get(name, 0) / cnt
-            for name, cnt in totals.items()
-            if cnt > 0
-        }
+        return {name: errors.get(name, 0) / cnt for name, cnt in totals.items() if cnt > 0}
 
     def agent_delegation(self) -> dict[str, list[str]]:
         """Map parent session agents to their sub-agents across v1 and v2."""
@@ -792,11 +779,7 @@ class OpenCodeDB:
                                     entries.append((t_ms, seq, mid, idx, f"[thinking]: {text}"))
 
             if "part" in tables:
-                dedup = (
-                    "AND message_id NOT IN (SELECT id FROM session_message)"
-                    if has_v2
-                    else ""
-                )
+                dedup = "AND message_id NOT IN (SELECT id FROM session_message)" if has_v2 else ""
                 rows = conn.execute(
                     f"""
                     SELECT id, time_created, data FROM part
@@ -894,11 +877,7 @@ class OpenCodeDB:
                         )
 
             if "part" in tables:
-                dedup = (
-                    "AND message_id NOT IN (SELECT id FROM session_message)"
-                    if has_v2
-                    else ""
-                )
+                dedup = "AND message_id NOT IN (SELECT id FROM session_message)" if has_v2 else ""
                 rows = conn.execute(
                     f"""
                     SELECT id, time_created, json_extract(data, '$.text') AS text FROM part

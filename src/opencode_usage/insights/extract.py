@@ -32,9 +32,7 @@ def _connect(db_path: Path | str) -> sqlite3.Connection:
 
 def _inspect_schema(conn: sqlite3.Connection) -> dict[str, set[str]]:
     """Return mapping of present table names to their column name sets."""
-    present = {
-        r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-    }
+    present = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     schema: dict[str, set[str]] = {}
     for table in _KNOWN_TABLES:
         if table in present:
@@ -827,11 +825,7 @@ def extract_delegation_stats(
         depth = 0
         current: str | None = sid
         seen: set[str] = set()
-        while (
-            current is not None
-            and current not in seen
-            and parent_map.get(current) is not None
-        ):
+        while current is not None and current not in seen and parent_map.get(current) is not None:
             seen.add(current)
             depth += 1
             current = parent_map[current]
